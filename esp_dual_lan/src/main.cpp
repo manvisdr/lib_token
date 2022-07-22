@@ -1,38 +1,16 @@
 #include <Arduino.h>
 #include <SPI.h>
-#include <lorawan.h>
 #include <Ethernet.h>
 #include <SoftwareSerial.h>
 
 SoftwareSerial swSer;
 
-#define csLora 5
 #define csipOne 15 // putih receiver modbus
 #define csResIpOne 34
 #define csipTwo 12 // ungu tranmitter to modem
-
-// LORA CONF
-// ABP Credentials
-const char *devAddr = "260DB31D";
-const char *nwkSKey = "45789AEC3AA3D97D22602D0CDDC5BBA8";
-const char *appSKey = "3868C323B2A6AD96AB8BAFB7AB3B002C";
-
-const unsigned long interval = 1000; // 10 s interval to send message
-unsigned long previousMillis = 0;    // will store last time message sent
-unsigned int counter = 0;            // message counter
-
-char myStr[50];
-char outStr[255];
-byte recvStatus = 0;
-
-const sRFM_pins RFM_pins = {
-    .CS = 5,
-    .RST = 14,
-    .DIO0 = 2,
-    .DIO1 = 4,
-    .DIO2 = -1,
-    .DIO5 = -1,
-};
+#define TCPPORT 23
+#define MAXCLIENTS 3
+#define BAUDRATE 9600
 
 // LAN CONF
 byte macOne[] = {0x90, 0xA2, 0xDA, 0x0f, 0x15, 0x81};
@@ -41,12 +19,15 @@ byte macTwo[] = {0x90, 0xA2, 0xDA, 0x0f, 0x15, 0x4C};
 IPAddress ipOne(192, 168, 0, 106); // ethernet 1
 IPAddress ipTwo(192, 168, 0, 105); // ethernet 2
 
-EthernetClient modbusEth;     // client ethernet 1 sebagai ethernet client utk modbus
-EthernetServer serverOne(80); // server ethernet 1
-EthernetServer serverTwo(80); // server ethernet 2
+EthernetServer server = EthernetServer(80);
+EthernetClient clients[MAXCLIENTS];
+byte macOne[] = {0x90, 0xA2, 0xDA, 0x0f, 0x15, 0x81};
+
+// EthernetServer serverOne(80); // server ethernet 1
+// EthernetServer serverTwo(80); // server ethernet 2
 
 String c = "";
-
+/*
 void startEthOne()
 {
   Serial.print(F("Starting One..."));
@@ -108,24 +89,6 @@ void lan_one_to_two()
   }
 }
 
-bool loraConfSetup()
-{
-  if (!lora.init())
-  {
-    Serial.println("RFM95 not detected");
-    delay(5000);
-    return false;
-  }
-
-  lora.setDeviceClass(CLASS_C);
-  lora.setDataRate(SF10BW125);
-  lora.setChannel(MULTI);
-  lora.setNwkSKey(nwkSKey);
-  lora.setAppSKey(appSKey);
-  lora.setDevAddr(devAddr);
-  return true;
-}
-
 void WizOffOne()
 {
   Serial.print("OFF Ethernet Board...  ");
@@ -141,18 +104,19 @@ void WizOnOne()
   delay(350);
   Serial.print("Done.\n");
 }
-
+*/
 void setup()
 {
   Serial.begin(9600);
   swSer.begin(9600, SWSERIAL_8N1, 22, 21, false, 256);
-  Serial.print(F("CONFIG LORA"));
 
-  loraConfSetup();
-  pinMode(csResIpOne, OUTPUT);
-  pinMode(csipOne, OUTPUT);
-  digitalWrite(csipOne, HIGH);
-  startEthOne();
+  Ethernet.init(csipOne);
+  Ethernet.begin(macOne, ipOne);
+
+  // pinMode(csResIpOne, OUTPUT);
+  // pinMode(csipOne, OUTPUT);
+  // digitalWrite(csipOne, HIGH);
+  // startEthOne();
 
   // pinMode(csipTwo, OUTPUT);
   // digitalWrite(csipTwo, HIGH);
@@ -179,30 +143,75 @@ void setup()
 
 void loop()
 {
-  digitalWrite(csLora, HIGH);
-  loraConfSetup();
-  if (millis() - previousMillis > interval)
+  size_t size;
+  Ethernet.maintain();
+  // Ethernet -> swSer
+  if (EthernetClient client = server.available())
   {
-    previousMillis = millis();
-    int coba = 1;
-    sprintf(myStr, "coba :%d", coba);
-
-    Serial.print("Sending: ");
-    Serial.println(myStr);
-    lora.sendUplink(myStr, strlen(myStr), 0, 1);
-    counter++;
+    // Check new TCP client
+    uint8_t count = 0;
+    bool is_new = true;
+    for (uint8_t i = 0; i < MAXCLIENTS; i++)
+    {
+      if (clients[i] == client && is_new)
+      {
+        is_new = false;
+      }
+      if (clients[i])
+        count++;
+    }
+    // Storing TCP client
+    if (is_new)
+    {
+      if (count < MAXCLIENTS)
+      {
+        for (uint8_t i = 0; i < MAXCLIENTS; i++)
+        {
+          if (!clients[i])
+          {
+            clients[i] = client;
+            client.flush();
+            break;
+          }
+        }
+      }
+      else
+      {
+        client.println(F("Too many connections!"));
+        client.stop();
+      }
+    }
+    // Data
+    while ((size = client.available()) > 0)
+    {
+      uint8_t *message = (uint8_t *)malloc(size);
+      size = client.read(message, size);
+      swSer.write(message, size);
+      free(message);
+    }
   }
-
-  lora.update();
-  digitalWrite(csLora, LOW);
-
-  Ethernet.init(csipOne);
-  EthernetClient client = serverOne.available();
-  char charSend[] = "acknowledged";
-  serverOne.write(charSend);
-  client.stop();
-  WizOffOne();
-
+  // swSer -> Ethernet
+  while ((size = swSer.available()) > 0)
+  {
+    uint8_t *message = (uint8_t *)malloc(size);
+    size = swSer.readBytes(message, size);
+    for (uint8_t i = 0; i < MAXCLIENTS; i++)
+    {
+      if (clients[i])
+      {
+        clients[i].write(message, size);
+      }
+    }
+    free(message);
+  }
+  // Offline clients
+  for (uint8_t i = 0; i < MAXCLIENTS; i++)
+  {
+    if (!(clients[i].connected()))
+    {
+      clients[i].stop();
+    }
+  }
   // lan_one_to_two();
 }
 

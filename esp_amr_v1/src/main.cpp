@@ -1,11 +1,10 @@
 #include <Arduino.h>
 #include <SPI.h>
 #include <lorawan.h>
-#include <Ethernet.h>
+#include <EthernetSPI2.h>
 
-#define csLora 5
 #define csEthOne 15 // putih receiver modbus
-
+#define csResIpOne 27
 // LORA CONF
 // ABP Credentials
 const char *devAddr = "260DB31D";
@@ -22,11 +21,9 @@ byte recvStatus = 0;
 
 const sRFM_pins RFM_pins = {
     .CS = 5,
-    .RST = 14,
+    .RST = 26,
     .DIO0 = 2,
     .DIO1 = 4,
-    // .DIO2 = -1,
-    // .DIO5 = -1,
 };
 
 // ETHERNET CONF
@@ -38,13 +35,11 @@ IPAddress ipEthOne(192, 168, 0, 106); // ethernet 1
 // Membuka akses port 23 untuk protokol TCP
 EthernetServer server(80);
 
-LoRaWANClass loraa;
+
 
 void setup()
 {
-  Serial.begin(9600);
-  // pinMode(csLora, OUTPUT);
-  // pinMode(csEthOne, OUTPUT);
+  Serial.begin(115200);
 
   if (!lora.init())
   {
@@ -59,52 +54,48 @@ void setup()
   lora.setNwkSKey(nwkSKey);
   lora.setAppSKey(appSKey);
   lora.setDevAddr(devAddr);
-  // digitalWrite(csLora, LOW);
 
-  Ethernet.init(csEthOne);
-  Ethernet.begin(macEthOne, ipEthOne);
-  server.begin();
-  Serial.println(F("Starting ethernet..."));
-  if (Ethernet.hardwareStatus() == EthernetNoHardware)
-  {
-    Serial.println("Ethernet shield was not found.  Sorry, can't run without hardware. :(");
-    while (true)
-    {
-      delay(1);
-    }
-  }
-  if (Ethernet.linkStatus() == LinkOFF)
-  {
-    Serial.println("Ethernet cable is not connected.");
-  }
-  Serial.println(Ethernet.localIP());
+   Ethernet.init(csEthOne);
+   Ethernet.begin(macEthOne, ipEthOne);
+   server.begin();
+   Serial.println(F("Starting ethernet..."));
+   if (Ethernet.hardwareStatus() == EthernetNoHardware)
+   {
+     Serial.println("Ethernet shield was not found.  Sorry, can't run without hardware. :(");
+     while (true)
+     {
+       delay(1);
+     }
+   }
+   if (Ethernet.linkStatus() == LinkOFF)
+   {
+     Serial.println("Ethernet cable is not connected.");
+   }
+   Serial.println(Ethernet.localIP());
 }
 
 void loop()
 {
-  // Mengirim data ke client yang telah terkoneksi
-  // digitalWrite(csEthOne, HIGH);
-  int randomData = random(0, 1000);
-  server.print("Sent from Arduino : ");
-  server.println(randomData);
-  delay(1000);
-
-  // digitalWrite(csEthOne, LOW);
-  // digitalWrite(csLora, HIGH);
 
   if (millis() - previousMillis > interval)
   {
     previousMillis = millis();
     int coba = 1;
-    sprintf(myStr, "coba :%d", randomData);
+    sprintf(myStr, "coba :%d", coba);
 
     Serial.print("Sending: ");
-    Serial.println(myStr);
+    Serial.print(myStr);
     lora.sendUplink(myStr, strlen(myStr), 0, 1);
+    Serial.print(F(" w/ RSSI "));
+    Serial.println(lora.getRssi());
     counter++;
   }
   lora.update();
 
   delay(1000);
-  // digitalWrite(csLora, LOW);
+
+   int randomData = random(0, 1000);
+   server.print("Sent from Arduino : ");
+   server.println(randomData);
+   delay(1000);
 }

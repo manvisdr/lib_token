@@ -15,7 +15,7 @@ byte recvStatus = 0;
 
 const sRFM_pins RFM_pins = {
     .CS = 5,
-    .RST = 14,
+    .RST = 26,
     .DIO0 = 2,
     .DIO1 = 4,
     // .DIO2 = -1,
@@ -62,7 +62,7 @@ void loop()
 
     //    Serial.print(mlx.readObjectTempC());
     //    Serial.println();
-    int coba = random(0, 1000);
+    int coba = 1;
     //    String coba = "Suhu :" + String(float(mlx.readObjectTempC()))
     //    println(coba);
     sprintf(myStr, "coba :%d", coba);
