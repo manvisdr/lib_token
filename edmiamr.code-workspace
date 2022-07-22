@@ -1,33 +1,11 @@
 {
 	"folders": [
 		{
-			"path": "Lora-gateway"
-		},
-		{
-			"name": "esp_dual_lan",
-			"path": "esp_dual_lan"
-		},
-		{
-			"name": "esp_modbus_eth",
-			"path": "esp_modbus_eth"
-		},
-		{
-			"name": "esp_modbus_rtu",
-			"path": "esp_modbus_rtu"
+			"path": "."
 		}
 	],
 	"settings": {
-		"files.associations": {
-			"array": "cpp",
-			"deque": "cpp",
-			"list": "cpp",
-			"string": "cpp",
-			"unordered_map": "cpp",
-			"unordered_set": "cpp",
-			"vector": "cpp",
-			"string_view": "cpp",
-			"initializer_list": "cpp",
-			"regex": "cpp"
-		}
+		"platformio-ide.activateProjectOnTextEditorChange": false,
+		"platformio-ide.activateOnlyOnPlatformIOProject": false
 	}
 }

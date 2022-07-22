@@ -1,26 +1,50 @@
 #include <Arduino.h>
 #include <SPI.h>
+#include <lorawan.h>
 #include <Ethernet.h>
-#include <ModbusClientTCPasync.h>
+#include <SoftwareSerial.h>
 
-#define csipOne 17  //putih receiver modbus
-#define csipTwo 5   //ungu tranmitter to modem
+SoftwareSerial swSer;
 
+#define csLora 5
+#define csipOne 15 // putih receiver modbus
+#define csResIpOne 34
+#define csipTwo 12 // ungu tranmitter to modem
+
+// LORA CONF
+// ABP Credentials
+const char *devAddr = "260DB31D";
+const char *nwkSKey = "45789AEC3AA3D97D22602D0CDDC5BBA8";
+const char *appSKey = "3868C323B2A6AD96AB8BAFB7AB3B002C";
+
+const unsigned long interval = 1000; // 10 s interval to send message
+unsigned long previousMillis = 0;    // will store last time message sent
+unsigned int counter = 0;            // message counter
+
+char myStr[50];
+char outStr[255];
+byte recvStatus = 0;
+
+const sRFM_pins RFM_pins = {
+    .CS = 5,
+    .RST = 14,
+    .DIO0 = 2,
+    .DIO1 = 4,
+    .DIO2 = -1,
+    .DIO5 = -1,
+};
+
+// LAN CONF
 byte macOne[] = {0x90, 0xA2, 0xDA, 0x0f, 0x15, 0x81};
 byte macTwo[] = {0x90, 0xA2, 0xDA, 0x0f, 0x15, 0x4C};
 
-IPAddress ipOne(192, 168, 0, 106);  //ethernet 1
-IPAddress ipTwo(192, 168, 0, 105);  //ethernet 2
+IPAddress ipOne(192, 168, 0, 106); // ethernet 1
+IPAddress ipTwo(192, 168, 0, 105); // ethernet 2
 
-EthernetClient modbusEth;           //client ethernet 1 sebagai ethernet client utk modbus
-// EthernetServer serverOne(80);       //server ethernet 1
-EthernetServer serverTwo(80);       //server ethernet 2
+EthernetClient modbusEth;     // client ethernet 1 sebagai ethernet client utk modbus
+EthernetServer serverOne(80); // server ethernet 1
+EthernetServer serverTwo(80); // server ethernet 2
 
-IPAddress ipSlaveModbus = {192, 168, 2, 5};    // IP address of modbus server
-uint16_t portModbus = 502;                // port of modbus server
-ModbusClientTCPasync modbusTCP(ipModbus, portModbus);
-
-boolean currentLineIsBlank = true;
 String c = "";
 
 void startEthOne()
@@ -41,30 +65,16 @@ void startEthTwo()
   serverTwo.begin();
 }
 
-void handleData(ModbusMessage response, uint32_t token) 
-{
-  Serial.printf("Response: serverID=%d, FC=%d, Token=%08X, length=%d:\n", response.getServerID(), response.getFunctionCode(), token, response.size());
-  for (auto& byte : response) {
-    Serial.printf("%02X ", byte);
-  }
-  Serial.println("");
-}
-
-void handleError(Error error, uint32_t token) 
-{
-  ModbusError me(error);
-  Serial.printf("Error response: %02X - %s token: %d\n", (int)me, (const char *)me, token);
-}
-
 void lan_one_to_two()
 {
   // ethernet one read //
   Ethernet.init(csipOne);
   EthernetClient client = serverOne.available();
-  currentLineIsBlank = true;
 
-  if (client) {
-    if (client.available() > 0) {
+  if (client)
+  {
+    if (client.available() > 0)
+    {
       char thisChar = (char)client.read();
       c += thisChar;
 
@@ -72,25 +82,23 @@ void lan_one_to_two()
       {
         client.stop();
 
-        //ethernet two send
+        // ethernet two send
         Ethernet.init(csipTwo);
         EthernetClient client = serverTwo.available();
-        currentLineIsBlank = true;
 
-        char charSend [] = "acknowledged";
+        char charSend[] = "acknowledged";
         serverTwo.write(charSend);
 
         // for (int i = 0; i < c.length()-1; i++ ) {
         //     Serial.println('Lan Two Connect');
         //         serverTwo.write((byte)c[i]);
         //   }
-
         // if (client) {  //starts client connection, checks for connection
         //   Serial.println('Lan Two Connect');
         //   for (int i = 0; i < c.length()-1; i++ ) {
         //         serverTwo.write((byte)c[i]);
         //   }
-        // } 
+        // }
         client.stop();
         Serial.print(c);
         // c = "";
@@ -100,35 +108,69 @@ void lan_one_to_two()
   }
 }
 
+bool loraConfSetup()
+{
+  if (!lora.init())
+  {
+    Serial.println("RFM95 not detected");
+    delay(5000);
+    return false;
+  }
+
+  lora.setDeviceClass(CLASS_C);
+  lora.setDataRate(SF10BW125);
+  lora.setChannel(MULTI);
+  lora.setNwkSKey(nwkSKey);
+  lora.setAppSKey(appSKey);
+  lora.setDevAddr(devAddr);
+  return true;
+}
+
+void WizOffOne()
+{
+  Serial.print("OFF Ethernet Board...  ");
+  digitalWrite(csResIpOne, LOW);
+  delay(350);
+  Serial.print("Done.\n");
+}
+
+void WizOnOne()
+{
+  Serial.print("ON Ethernet Board...  ");
+  digitalWrite(csResIpOne, HIGH);
+  delay(350);
+  Serial.print("Done.\n");
+}
+
 void setup()
 {
-  Serial.begin(115200);
+  Serial.begin(9600);
+  swSer.begin(9600, SWSERIAL_8N1, 22, 21, false, 256);
+  Serial.print(F("CONFIG LORA"));
 
-  pinMode(csipOne,OUTPUT);
-  digitalWrite(csipOne,HIGH);
-
-  pinMode(csipTwo,OUTPUT);
-  digitalWrite(csipTwo,HIGH);
-
-  modbusTCP.onDataHandler(&handleData);
-  modbusTCP.onErrorHandler(&handleError);
-  modbusTCP.setTimeout(10000);
-  modbusTCP.setIdleTimeout(60000);
-
+  loraConfSetup();
+  pinMode(csResIpOne, OUTPUT);
+  pinMode(csipOne, OUTPUT);
+  digitalWrite(csipOne, HIGH);
   startEthOne();
-  startEthTwo();
+
+  // pinMode(csipTwo, OUTPUT);
+  // digitalWrite(csipTwo, HIGH);
+  // startEthTwo();
 
   Serial.println(F("Starting ethernet..."));
-  if (Ethernet.hardwareStatus() == EthernetNoHardware) {
+  if (Ethernet.hardwareStatus() == EthernetNoHardware)
+  {
     Serial.println("Ethernet shield was not found.  Sorry, can't run without hardware. :(");
-    while (true) {
+    while (true)
+    {
       delay(1); // do nothing, no point running without Ethernet hardware
     }
   }
-  if (Ethernet.linkStatus() == LinkOFF) {
+  if (Ethernet.linkStatus() == LinkOFF)
+  {
     Serial.println("Ethernet cable is not connected.");
   }
-  
 
   delay(2000);
   Serial.print("Chat server address:");
@@ -137,18 +179,31 @@ void setup()
 
 void loop()
 {
-  static unsigned long lastMillis = 0;
-  if (millis() - lastMillis > 5000) {
-    lastMillis = millis();
-    Serial.printf("sending request with token %d\n", (uint32_t)lastMillis);
-    Error err;
-    err = modbusTCP.addRequest((uint32_t)lastMillis, 1, READ_HOLD_REGISTER, 40000, 10);
-    if (err != SUCCESS) {
-      ModbusError e(err);
-      Serial.printf("Error creating request: %02X - %s\n", (int)e, (const char *)e);
-    }
+  digitalWrite(csLora, HIGH);
+  loraConfSetup();
+  if (millis() - previousMillis > interval)
+  {
+    previousMillis = millis();
+    int coba = 1;
+    sprintf(myStr, "coba :%d", coba);
+
+    Serial.print("Sending: ");
+    Serial.println(myStr);
+    lora.sendUplink(myStr, strlen(myStr), 0, 1);
+    counter++;
   }
-  lan_one_to_two();
+
+  lora.update();
+  digitalWrite(csLora, LOW);
+
+  Ethernet.init(csipOne);
+  EthernetClient client = serverOne.available();
+  char charSend[] = "acknowledged";
+  serverOne.write(charSend);
+  client.stop();
+  WizOffOne();
+
+  // lan_one_to_two();
 }
 
 // -------------------------------------------------------------------------
