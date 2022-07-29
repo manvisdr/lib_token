@@ -256,6 +256,8 @@ double ConvertNumberToFloat(unsigned long number, int isDoublePrecision)
   return value;
 }
 
+// uint32_t value = strtoul(strCoreData.c_str(), NULL, 16);
+// dtostrf(ConvertB32ToFloat(value), 1, 9, s);
 float ConvertB32ToFloat(uint32_t b32)
 {
   float result;
@@ -286,18 +288,24 @@ float ConvertB32ToFloat(uint32_t b32)
   return result;
 }
 
-unsigned char receivedVal[13] =
-    {0x02, 0x06, 0x06, 0xA4, 0x03, 0x02, 0x52,
-     0xF0, 0x10, 0x02, 0xEE, 0x45, 0x03};
-unsigned char serialnumber[] =
-    {0x02, 0x52, 0xF0, 0x10, 0x42, 0x32, 0x31,
-     0x37, 0x30, 0x37, 0x32, 0x34, 0x37, 0x30, 0x00, 0x06, 0xA3, 0x03};
+bool getDataSerial(char *pDest, unsigned long *pTimer)
+{
+  if (Serial2.available())
+  {
+    // get the character
+    *pDest = Serial2.read();
+    return true;
+  } // if
+  else
+    return false;
+}
 
 byte result = 0;
 byte c = 0;
 byte currData = 0;
 int posData = 0;
 int aa = 0;
+char charData;
 
 createSafeString(stringData, 50);
 createSafeString(stringCRC, 4);
@@ -316,6 +324,7 @@ void setup()
 }
 void loop()
 {
+
   if (Serial2.available())
   {
     while (Serial2.available() > 0)

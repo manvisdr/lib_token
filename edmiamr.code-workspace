@@ -1,11 +1,29 @@
 {
 	"folders": [
 		{
-			"path": "."
+			"path": "arduino_ascii"
+		},
+		{
+			"name": "esp_amr_v1",
+			"path": "esp_amr_v1"
+		},
+		{
+			"name": "esp_dual_lan",
+			"path": "esp_dual_lan"
+		},
+		{
+			"name": "arduino_mega_edmiparse",
+			"path": "arduino_mega_edmiparse"
+		},
+		{
+			"name": "esp_amr_soft",
+			"path": "esp_amr_soft"
 		}
 	],
 	"settings": {
-		"platformio-ide.activateProjectOnTextEditorChange": false,
-		"platformio-ide.activateOnlyOnPlatformIOProject": false
+		"files.associations": {
+			"random": "cpp",
+			"functional": "cpp"
+		}
 	}
 }

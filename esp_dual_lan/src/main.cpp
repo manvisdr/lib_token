@@ -19,11 +19,7 @@ byte macTwo[] = {0x90, 0xA2, 0xDA, 0x0f, 0x15, 0x4C};
 IPAddress ipOne(192, 168, 0, 106); // ethernet 1
 IPAddress ipTwo(192, 168, 0, 105); // ethernet 2
 
-EthernetServer server = EthernetServer(80);
-EthernetClient clients[MAXCLIENTS];
-byte macOne[] = {0x90, 0xA2, 0xDA, 0x0f, 0x15, 0x81};
-
-// EthernetServer serverOne(80); // server ethernet 1
+EthernetServer serverOne(80); // server ethernet 1
 // EthernetServer serverTwo(80); // server ethernet 2
 
 String c = "";
@@ -112,6 +108,7 @@ void setup()
 
   Ethernet.init(csipOne);
   Ethernet.begin(macOne, ipOne);
+  serverOne.begin();
 
   // pinMode(csResIpOne, OUTPUT);
   // pinMode(csipOne, OUTPUT);
@@ -143,75 +140,12 @@ void setup()
 
 void loop()
 {
-  size_t size;
-  Ethernet.maintain();
-  // Ethernet -> swSer
-  if (EthernetClient client = server.available())
-  {
-    // Check new TCP client
-    uint8_t count = 0;
-    bool is_new = true;
-    for (uint8_t i = 0; i < MAXCLIENTS; i++)
-    {
-      if (clients[i] == client && is_new)
-      {
-        is_new = false;
-      }
-      if (clients[i])
-        count++;
-    }
-    // Storing TCP client
-    if (is_new)
-    {
-      if (count < MAXCLIENTS)
-      {
-        for (uint8_t i = 0; i < MAXCLIENTS; i++)
-        {
-          if (!clients[i])
-          {
-            clients[i] = client;
-            client.flush();
-            break;
-          }
-        }
-      }
-      else
-      {
-        client.println(F("Too many connections!"));
-        client.stop();
-      }
-    }
-    // Data
-    while ((size = client.available()) > 0)
-    {
-      uint8_t *message = (uint8_t *)malloc(size);
-      size = client.read(message, size);
-      swSer.write(message, size);
-      free(message);
-    }
-  }
-  // swSer -> Ethernet
-  while ((size = swSer.available()) > 0)
-  {
-    uint8_t *message = (uint8_t *)malloc(size);
-    size = swSer.readBytes(message, size);
-    for (uint8_t i = 0; i < MAXCLIENTS; i++)
-    {
-      if (clients[i])
-      {
-        clients[i].write(message, size);
-      }
-    }
-    free(message);
-  }
-  // Offline clients
-  for (uint8_t i = 0; i < MAXCLIENTS; i++)
-  {
-    if (!(clients[i].connected()))
-    {
-      clients[i].stop();
-    }
-  }
+  delay(1000);
+
+  int randomData = random(0, 1000);
+  serverOne.print("ETH ONE Sent from Arduino : ");
+  serverOne.println(randomData);
+
   // lan_one_to_two();
 }
 
