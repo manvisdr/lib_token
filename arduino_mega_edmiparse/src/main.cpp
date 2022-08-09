@@ -411,6 +411,7 @@ void loop()
       else
       {
         char s[16];
+        Serial.print(strCoreData.c_str());
         uint32_t value = strtoul(strCoreData.c_str(), NULL, 16);
         dtostrf(ConvertB32ToFloat(value), 1, 9, s);
         Serial.println(s);

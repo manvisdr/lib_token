@@ -1,8 +1,14 @@
 #include <Arduino.h>
-#include <SPI.h>
 
 #define RXD2 16
 #define TXD2 17
+// defines
+// special characters used for msg framing
+#include <Arduino.h>
+#include <AltSoftSerial.h>
+
+AltSoftSerial altSerial;
+
 // defines
 // special characters used for msg framing
 #define ACK 0x06  // ACKNOWLEDGE
@@ -26,6 +32,9 @@
 #define CHAR_TIMEOUT 2000            // expect chars within a second (?)
 #define BUFF_SIZE 20                 // buffer size (characters)
 #define MAX_RX_CHARS (BUFF_SIZE - 2) // number of bytes we allow (allows for NULL term + 1 byte margin)
+#define SERIALNUM_CHAR 10
+#define KWH_CHAR 4
+#define KWH_OUT_CHAR 16
 
 #define LED_BLIP_TIME 300 // mS time LED is blipped each time an ENQ is sent
 
@@ -36,17 +45,20 @@
 #define ST_CAN 3
 #define ST_CON 4
 #define ST_LOGIN 5
-#define ST_READ 6
-#define ST_RX_READ 7
-#define ST_LOGOUT 8
-#define ST_MSG_TIMEOUT 9
+#define ST_LOGIN_R 6
+#define ST_IDLE 7
+#define ST_READ 8
+#define ST_RX_READ 9
+#define ST_LOGOUT 10
+#define ST_MSG_TIMEOUT 11
 
 // state reg
-#define ST_REG_SERIAL 0
-#define ST_REG_KWH_A 1
-#define ST_REG_KWH_B 2
-#define ST_REG_KWH_T 3
-#define ST_REG_END 4
+#define ST_REG_CON 0
+#define ST_REG_SERIAL 1
+#define ST_REG_KWH_A 2
+#define ST_REG_KWH_B 3
+#define ST_REG_KWH_T 4
+#define ST_REG_END 5
 
 // constants
 // pins to be used may vary with your Arduino for software-serial...
@@ -63,13 +75,18 @@ byte regKWHTOT[2] = {0x1E, 0x00};
 // globals
 char
     rxTextFrame[BUFF_SIZE];
+char
+    dataRX[BUFF_SIZE];
 
 bool
     bLED;
 unsigned long
     timeLED;
 
-char outSerialNumber[10];
+char outSerialNumber[SERIALNUM_CHAR];
+char outKWHA[KWH_OUT_CHAR];
+char outKWHB[KWH_OUT_CHAR];
+char outKWHTOT[KWH_OUT_CHAR];
 
 void ReceiveStateMachine(void);
 bool GetSerialChar(char *pDest, unsigned long *pTimer);
@@ -102,7 +119,7 @@ CalculateCharacterCRC16(unsigned short crc, unsigned char c)
 // SEND TO KWH
 void cmdlink_putch(unsigned char ch)
 {
-  Serial2.write(ch);
+  altSerial.write(ch);
 }
 
 void send_byte(unsigned char d)
@@ -127,26 +144,26 @@ void send_cmd(unsigned char *cmd, unsigned short len)
   unsigned short i;
   unsigned short crc;
   /*
-   * Add the STX and start the CRC calc.
-   */
+     Add the STX and start the CRC calc.
+  */
   cmdlink_putch(STX);
   crc = CalculateCharacterCRC16(0, STX);
   /*
-   * Send the data, computing CRC as we go.
-   */
+     Send the data, computing CRC as we go.
+  */
   for (i = 0; i < len; i++)
   {
     send_byte(*cmd);
     crc = CalculateCharacterCRC16(crc, *cmd++);
   }
   /*
-   * Add the CRC
-   */
+     Add the CRC
+  */
   send_byte((unsigned char)(crc >> 8));
   send_byte((unsigned char)crc);
   /*
-   * Add the ETX
-   */
+     Add the ETX
+  */
   cmdlink_putch(ETX);
 }
 
@@ -243,10 +260,6 @@ void textFromHexString(char *hex, char *result)
   *result = '\0';
 }
 
-void parsingSerialNum(char *reg)
-{
-}
-
 float ConvertB32ToFloat(uint32_t b32)
 {
   float result;
@@ -286,7 +299,10 @@ void ReceiveStateMachine(void)
   static byte
       regCnt = 0;
   static byte
-      stateReg = ST_REG_SERIAL;
+      rxCnt = 0;
+  static byte
+      stateReg = ST_REG_CON,
+      stateRegLast = stateReg;
   static unsigned long
       timeMsg = 0,
       timeRX;
@@ -302,230 +318,154 @@ void ReceiveStateMachine(void)
   case ST_CON:
     if ((timeNow - timeMsg) >= MSG_INTERVAL)
     {
-      // turn on the LED for visual indication
-      bLED = true;
+      bLED = true; // turn on the LED for visual indication
       timeLED = timeNow;
       digitalWrite(pinLED, HIGH);
-
-      // send an ENQ character
-      // Serial2.write(ENQ);
       cmd_trigMeter();
       timeRX = timeNow;   // character timeout
       stateRX = ST_LOGIN; // wait for the start of text
-
-    } // if
-
+    }                     // if
     break;
 
   case ST_LOGIN:
-    // skip over the header; we're looking for the STX character
     if (GetSerialChar(&ch, &timeRX) == true)
     {
-      if (ch == ACK)
+      regCnt++;
+      if (ch == ACK /*and regCnt == 2*/)
       {
-        Serial.println(F("DEBUG: ST_LOGIN:"));
-        Serial.println(F("    CONNECT ACK."));
-        // got it; move to receive body of msg
+        Serial.println(F("DEBUG: ST_LOGIN: CONNECT ACK."));
         cmd_logonMeter();
-        stateRX = ST_READ;
-
+        stateRX = ST_LOGIN_R;
       } // if
-
-    } // if
+    }
     else
     {
-      // check for a timeout
       if (CheckTimeout(&timeNow, &timeRX))
       {
-        Serial.println(F("DEBUG: ST_LOGIN:"));
-        Serial.println(F("      TIMEOUT..."));
+        Serial.println(F("DEBUG: ST_LOGIN: TIMEOUT..."));
         stateRX = ST_MSG_TIMEOUT;
       }
-
     } // else
-
     break;
 
-  case ST_READ:
-    // skip over the header; we're looking for the STX character
+  case ST_LOGIN_R:
     if (GetSerialChar(&ch, &timeRX) == true)
     {
-      if (ch == ACK)
+      regCnt++;
+      if (ch == ACK /*and regCnt == 2*/)
       {
-        Serial.println(F("DEBUG: ST_READ:"));
-        Serial.println(F("    LOGIN ACK."));
-        // got it; move to receive body of msg
-        // switch (stateReg)
-        // {
-        // case ST_REG_SERIAL:
-        //   Serial.println(F("      READ  - SERIAL NUMBER."));
-        //   cmd_readRegister(regSerNum);
-        //   stateReg = ST_REG_KWH_A;
-        //   break;
-        // case ST_REG_KWH_A:
-        //   Serial.println(F("      READ  - KWH A."));
-        //   cmd_readRegister(regKWHA);
-        //   stateReg = ST_REG_KWH_B;
-        //   break;
-        // case ST_REG_KWH_B:
-        //   Serial.println(F("      READ  - KWH B."));
-        //   cmd_readRegister(regKWHB);
-        //   stateReg = ST_REG_KWH_T;
-        //   break;
-        // case ST_REG_KWH_T:
-        //   Serial.println(F("      READ  - KWH TOTAL."));
-        //   cmd_readRegister(regKWHTOT);
-        //   stateReg = ST_REG_END;
-        //   break;
-        // }
-        cmd_readRegister(regSerNum);
-        stateRX = ST_RX_READ;
-
+        Serial.println(F("DEBUG: ST_LOGIN_R: LOGIN ACK."));
+        stateRX = ST_READ;
       } // if
-
-    } // if
+    }   // if
     else
     {
-      // check for a timeout
       if (CheckTimeout(&timeNow, &timeRX))
       {
-        Serial.println(F("DEBUG: ST_READ:"));
-        Serial.println(F("      TIMEOUT..."));
+        Serial.println(F("DEBUG: ST_LOGIN_R: TIMEOUT..."));
         stateRX = ST_MSG_TIMEOUT;
       }
-
-    } // else
-
+    }
+    break;
+  case ST_READ:
+    Serial.println(F("DEBUG: ST_READ: LOGIN ACK."));
+    switch (stateReg)
+    {
+    case ST_REG_SERIAL:
+      Serial.println(F("      READ  - SERIAL NUMBER."));
+      cmd_readRegister(regSerNum);
+      stateRegLast = stateReg;
+      stateRX = ST_RX_READ;
+      break;
+      //        case ST_REG_KWH_A:
+      //          Serial.println(F("      READ  - KWH A."));
+      //          cmd_readRegister(regKWHA);
+      //          stateRegLast = stateReg;
+      //          //          stateRX = ST_RX_READ;
+      //          break;
+      //        case ST_REG_KWH_B:
+      //          Serial.println(F("      READ  - KWH B."));
+      //          cmd_readRegister(regKWHB);
+      //          stateRegLast = stateReg;
+      //          //          stateRX = ST_RX_READ;
+      //          break;
+      //        case ST_REG_KWH_T:
+      //          Serial.println(F("      READ  - KWH TOTAL."));
+      //          cmd_readRegister(regKWHTOT);
+      //          stateRegLast = stateReg;
+      //          //          stateRX = ST_RX_READ;
+      //          break;
+    }
+    stateRX = ST_RX_READ;
     break;
 
   case ST_RX_READ:
-    // receive characters into rxBuff until we see a LF
     if (GetSerialChar(&ch, &timeRX) == true)
     {
-      if (ch == ACK)
-      {
-        Serial.println(F("DEBUG: ST_RX_READ:"));
-        Serial.println(F("    ACK - RETURN ST_READ"));
-        // got it; move to receive body of msg
-        stateRX = ST_READ;
-      } // if
-      else if (ch == CAN)
-      {
-        Serial.println(F("DEBUG: ST_RX_READ:"));
-        Serial.println(F("    CAN - CANCEL"));
-        // got it; move to receive body of msg
-        stateRX = ST_LOGOUT;
-      } // if
-      else if (ch == CHAR_REGREAD and rxPtr > 10)
-      {
-        Serial.println(F("DEBUG: ST_RX_READ: GET DATA"));
-        Serial.print(F("     CODE - "));
-        Serial.println(ch);
-        rxTextFrame[rxPtr] = NUL;
-        for (size_t i = 0; i < rxPtr; i++)
-        {
-          Serial.print(rxTextFrame[i], HEX);
-        }
-        Serial.println(F(" "));
-        Serial.println(rxTextFrame);
-        // parsingCMD((unsigned char *)rxTextFrame, rxPtr);
-
-        rxPtr = 0;
-        memset(rxTextFrame, 0x00, BUFF_SIZE); // array is reset to 0s.
-
-        // if (stateReg == ST_REG_END)
-        // {
-        //   Serial.println(F("DEBUG: ST_RX_READ: READ END"));
-        //   Serial.println(F("      LOGOUT..."));
-        //   cmd_logoffMeter();
-        //   stateRX = ST_LOGOUT;
-        //   stateReg = ST_REG_SERIAL;
-        // }
-        // else
-        //   stateRX = ST_READ;
-
-      } // else if
-      else
-      {
-        // receive another character into the buffer
-        rxTextFrame[rxPtr] = ch;
-
-        // protect the buffer from overflow
-        if (rxPtr < MAX_RX_CHARS)
-          rxPtr++;
-
-      } // else
-
-    } // if
+      // receive another character into the buffer
+      rxTextFrame[rxPtr] = ch;
+      // protect the buffer from overflow
+      if (rxPtr < MAX_RX_CHARS)
+        rxPtr++;
+      Serial.println
+    }
+    // if
     else
     {
       // check for a timeout
       if (CheckTimeout(&timeNow, &timeRX))
       {
-        Serial.println(F("DEBUG: ST_RX_READ:"));
-        Serial.println(F("      TIMEOUT..."));
+        Serial.println(F("DEBUG: ST_RX_READ: TIMEOUT..."));
         stateRX = ST_MSG_TIMEOUT;
       }
-
     } // else
-
     break;
 
   case ST_LOGOUT:
     // receive characters into rxBuff until we see a LF
+    regCnt = 0;
     if (GetSerialChar(&ch, &timeRX) == true)
     {
       // have we received the EOT token?
       if (ch == ACK)
       {
-        Serial.println(F("DEBUG: ST_LOGOUT:"));
-        Serial.println(F("    LOGOUT ACK"));
+        Serial.println(F("DEBUG: ST_LOGOUT: LOGOUT ACK"));
         // yes; reset ENQ timer and return to that state
         timeMsg = timeNow;
         stateRX = ST_CON;
-
       } // if
-
-    } // if
+    }   // if
     else
     {
       // check for a timeout
       if (CheckTimeout(&timeNow, &timeRX))
       {
-        Serial.println(F("DEBUG: ST_LOGOUT:"));
-        Serial.println(F("      TIMEOUT..."));
+        Serial.println(F("DEBUG: ST_LOGOUT: TIMEOUT..."));
         stateRX = ST_MSG_TIMEOUT;
       }
-
     } // else
-
     break;
 
   case ST_MSG_TIMEOUT:
-    // we timed out waiting for a character; display error
     Serial.println(F("DEBUG: ST_MSG_TIMEOUT:")); // send debug msg to serial monitor
     Serial.println(F("      Timeout waiting for character"));
 
-    // probably not needed since we just timed out but flush the serial buffer anyway
-    while (Serial2.available())
-      ch = Serial2.read();
+    while (altSerial.available())
+      ch = altSerial.read();
 
     // then reset back to ENQ state
     timeMsg = timeNow;
     stateRX = ST_CON;
-
     break;
-
   } // switch
-
 } // ReceiveStateMachine
 
 bool GetSerialChar(char *pDest, unsigned long *pTimer)
 {
-  if (Serial2.available())
+  if (altSerial.available())
   {
     // get the character
-    *pDest = Serial2.read();
+    *pDest = altSerial.read();
 
     // and reset the character timeout
     *pTimer = millis();
@@ -582,35 +522,6 @@ void hexStringtoASCII(char *hex, char *result)
 
 // uint32_t value = strtoul(strCoreData.c_str(), NULL, 16);
 // dtostrf(ConvertB32ToFloat(value), 1, 9, s);
-float ConvertB32ToFloat(uint32_t b32)
-{
-  float result;
-  int32_t shift;
-  uint16_t bias;
-
-  if (b32 == 0)
-    return 0.0;
-  // pull significand
-  result = (b32 & 0x7fffff); // mask significand
-  result /= (0x800000);      // convert back to float
-  result += 1.0f;            // add one back
-  // deal with the exponent
-  bias = 0x7f;
-  shift = ((b32 >> 23) & 0xff) - bias;
-  while (shift > 0)
-  {
-    result *= 2.0;
-    shift--;
-  }
-  while (shift < 0)
-  {
-    result /= 2.0;
-    shift++;
-  }
-  // sign
-  result *= (b32 >> 31) & 1 ? -1.0 : 1.0;
-  return result;
-}
 
 void setup()
 {

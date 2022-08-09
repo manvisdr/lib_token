@@ -38,6 +38,7 @@ void setup()
 {
   Serial.begin(9600);
   altser.begin(9600); // to AltSoftSerial RX
+  pinMode(LED_BUILTIN, OUTPUT);
 }
 
 void loop()
@@ -70,6 +71,7 @@ void loop()
   byte n = altser.available(); // check that a data item has arrived from sender
   if (n != 0)
   {
+    digitalWrite(LED_BUILTIN, HIGH);
     if (flag != true)
     {
       byte x = altser.read();
@@ -94,6 +96,17 @@ void loop()
         flag = false;
         break;
       case 0x52:
+        // if (data == 0xF0)
+        // {
+        //   altser.write(serialNum, sizeof(serialNum));
+        //   Serial.write(serialNum, sizeof(serialNum));
+        // }
+        // if (data == 0x1E)
+        // {
+        //   altser.write(kwhreg, sizeof(kwhreg));
+        //   Serial.write(kwhreg, sizeof(kwhreg));
+        // }
+
         altser.write(kwhreg, sizeof(kwhreg));
         Serial.write(kwhreg, sizeof(kwhreg));
         flag = false;
@@ -109,12 +122,13 @@ void loop()
         flag = false;
         break;
 
-      default:
-        altser.write(ack, sizeof(ack));
-        Serial.write(ack, sizeof(ack));
-        flag = false;
-        break;
+        // default:
+        //   altser.write(ack, sizeof(ack));
+        //   Serial.write(ack, sizeof(ack));
+        //   flag = false;
+        //   break;
       }
     }
   }
+  digitalWrite(LED_BUILTIN, LOW);
 }
