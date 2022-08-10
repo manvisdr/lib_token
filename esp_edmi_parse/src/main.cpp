@@ -512,10 +512,11 @@ void kwh_parseData()
     Serial.print(F("     "));
     Serial.println(buffData);
     // Serial.print(convert((byte)buffData)); using union
+    // outKWHA = convert((byte)buffData);
 
     Serial.println(outParse);
     value = strtoul(outParse.c_str(), NULL, 16);
-    dtostrf(ConvertB32ToFloat(value), 1, 0, outKWHA);
+    dtostrf(convert((byte)buffData), 1, 0, outKWHA);
     Serial.println(outKWHA);
     outParse.clear();
 
@@ -540,7 +541,7 @@ void kwh_parseData()
 
     Serial.println(outParse);
     value = strtoul(outParse.c_str(), NULL, 16);
-    dtostrf(ConvertB32ToFloat(value), 1, 0, outKWHB);
+    dtostrf(convert((byte)buffData), 1, 0, outKWHB);
     Serial.println(outKWHB);
     outParse.clear();
 
@@ -565,7 +566,7 @@ void kwh_parseData()
 
     Serial.println(outParse);
     value = strtoul(outParse.c_str(), NULL, 16);
-    dtostrf(ConvertB32ToFloat(value), 1, 0, outKWHTOT);
+    dtostrf(convert((byte)buffData), 1, 0, outKWHTOT);
     Serial.println(outKWHTOT);
     outParse.clear();
 

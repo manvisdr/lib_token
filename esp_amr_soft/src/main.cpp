@@ -700,7 +700,7 @@ bool mqttConnectEth()
       break;
 
     mqttClientEth.setServer(serverName.c_str(), 1883);
-    // server.println(String("Attempting MQTT broker:") + serverName);
+    // //server.println(String("Attempting MQTT broker:") + serverName);
 
     for (uint8_t i = 0; i < 8; i++)
     {
@@ -710,7 +710,7 @@ bool mqttConnectEth()
     // Setting mqtt gaes
     if (mqttClientEth.connect(clientId, userKey.c_str(), apiKey.c_str()))
     {
-      // server.println("Established:" + String(clientId));
+      // //server.println("Established:" + String(clientId));
       return true;
     }
     else
@@ -800,15 +800,15 @@ String loadParams(AutoConnectAux &aux, PageArgument &args)
     if (aux.loadElement(param))
     {
       getParams(aux);
-      // server.println(PARAM_FILE " loaded");
+      // //server.println(PARAM_FILE " loaded");
     }
     else
-      // server.println(PARAM_FILE " failed to load");
+      // //server.println(PARAM_FILE " failed to load");
       param.close();
   }
   else
   {
-    // server.println(PARAM_FILE " open failed");
+    // //server.println(PARAM_FILE " open failed");
   }
   return String("");
 }
@@ -822,15 +822,15 @@ String loadParamsLan(AutoConnectAux &aux, PageArgument &args)
     if (aux.loadElement(paramLan))
     {
       getParamsLan(aux);
-      // server.println(PARAM_FILE " loaded");
+      // //server.println(PARAM_FILE " loaded");
     }
     else
-      // server.println(PARAM_FILE " failed to load");
+      // //server.println(PARAM_FILE " failed to load");
       paramLan.close();
   }
   else
   {
-    // server.println(PARAM_FILE " open failed");
+    // //server.println(PARAM_FILE " open failed");
   }
   return String("");
 }
@@ -844,15 +844,15 @@ String loadParamsLora(AutoConnectAux &aux, PageArgument &args)
     if (aux.loadElement(paramLora))
     {
       getParamsLora(aux);
-      // server.println(PARAM_FILE " loaded");
+      // //server.println(PARAM_FILE " loaded");
     }
     else
-      // server.println(PARAM_FILE " failed to load");
+      // //server.println(PARAM_FILE " failed to load");
       paramLora.close();
   }
   else
   {
-    // server.println(PARAM_FILE " open failed");
+    // //server.println(PARAM_FILE " open failed");
   }
   return String("");
 }
@@ -866,15 +866,15 @@ String loadParamsSocket(AutoConnectAux &aux, PageArgument &args)
     if (aux.loadElement(paramSocket))
     {
       getParamsSocket(aux);
-      // server.println(PARAM_FILE " loaded");
+      // //server.println(PARAM_FILE " loaded");
     }
     else
-      // server.println(PARAM_FILE " failed to load");
+      // //server.println(PARAM_FILE " failed to load");
       paramSocket.close();
   }
   else
   {
-    // server.println(PARAM_FILE " open failed");
+    // //server.println(PARAM_FILE " open failed");
   }
   return String("");
 }
@@ -888,15 +888,15 @@ String loadParamsProfile(AutoConnectAux &aux, PageArgument &args)
     if (aux.loadElement(paramProfile))
     {
       getParamsProfile(aux);
-      // server.println(PARAM_FILE " loaded");
+      // //server.println(PARAM_FILE " loaded");
     }
     else
-      // server.println(PARAM_FILE " failed to load");
+      // //server.println(PARAM_FILE " failed to load");
       paramProfile.close();
   }
   else
   {
-    // server.println(PARAM_FILE " open failed");
+    // //server.println(PARAM_FILE " open failed");
   }
   return String("");
 }
@@ -911,7 +911,7 @@ String saveParams(AutoConnectAux &aux, PageArgument &args)
   mqtt_setting.saveElement(param, {"mqttserver", "port", "userkey", "apikey"});
 
   String sendConfig = "mqtt*" + String(serverName) + "*" + String(userKey) + "*" + String(apiKey) + "*" + String(Port) + "#";
-  server.println(sendConfig);
+  // server.println(sendConfig);
 
   param.close();
 
@@ -927,7 +927,7 @@ String saveParams(AutoConnectAux &aux, PageArgument &args)
 void handleReboot()
 {
   HTTPClient httpClient;
-  server.println("Device Reboot");
+  // server.println("Device Reboot");
   WiFiWebServer &webServer = portal.host();
   webServer.sendHeader("Location", String("http://") + webServer.client().localIP().toString() + String("/"));
   webServer.send(302, "text/plain", "");
@@ -952,7 +952,7 @@ String saveParamsLan(AutoConnectAux &aux, PageArgument &args)
     condDHCP = 1;
   }
   String sendConfig = "IP*" + String(ipAddres) + "*" + String(Gateway) + "*" + String(netMask) + "*" + String(DNS) + "*" + String(condDHCP) + "#";
-  server.println(sendConfig);
+  // server.println(sendConfig);
   paramLan.close();
   AutoConnectText &echo = aux["parameters"].as<AutoConnectText>();
   echo.value += "IP Addres: " + ipAddres + "<br>";
@@ -1001,7 +1001,7 @@ String saveParamsProfile(AutoConnectAux &aux, PageArgument &args)
   getParamsProfile(profile_setting);
   File paramProfile = FlashFS.open(PARAM_FILE3, "w");
   profile_setting.saveElement(paramProfile, {"customerID", "kwhType", "enableWifi", "enableLAN", "enableLora", "enableConverter"});
-  server.println(dataProfile);
+  // server.println(dataProfile);
   paramProfile.close();
   AutoConnectText &echo = aux["parameterProfile"].as<AutoConnectText>();
   echo.value += "Customer ID: " + customerID + "<br>";
@@ -1034,7 +1034,7 @@ void handleRoot()
 void handleReset()
 {
   HTTPClient httpClient;
-  server.println("Device Reset");
+  // server.println("Device Reset");
   AutoConnectAux &mqtt_setting = *portal.aux(AUX_SETTING_URI);
   getParams(mqtt_setting);
 
@@ -1057,11 +1057,11 @@ void handleReset()
   {
     mqtt_setting.saveElement(param, {"mqttserver", "port", "userkey", "apikey"});
     param.close();
-    server.println("Data Tersimpan");
+    // server.println("Data Tersimpan");
   }
   else
   {
-    server.println("open file error");
+    // server.println("open file error");
   }
 
   AutoConnectCredential credential;
@@ -1085,8 +1085,8 @@ bool loraConf()
 {
   // if (!lora.init())
   // {
-  //   server.println("DEBUG: loraConf()");
-  //   server.println("    LORA NOT DETECTED - WAIT 5 SEC");
+  //   //server.println("DEBUG: loraConf()");
+  //   //server.println("    LORA NOT DETECTED - WAIT 5 SEC");
   //   delay(5000);
   //   return false;
   // }
@@ -1104,32 +1104,32 @@ bool checkSendMode()
 {
   if (enableLora)
   {
-    server.println(F("DEBUG: MODE LORA"));
+    // server.println(F("DEBUG: MODE LORA"));
     loraConf();
   }
   if (enableLAN)
   {
-    server.print(F("DEBUG: enableLAN: DHCP: "));
+    // server.print(F("DEBUG: enableLAN: DHCP: "));
     if (checkDHCP)
     {
       if (Ethernet.begin(mac) == 0)
       {
-        server.println(F("DEBUG: ETH: Failed DHCP"));
+        // server.println(F("DEBUG: ETH: Failed DHCP"));
         if (Ethernet.hardwareStatus() == EthernetNoHardware)
         {
-          server.println(F("DEBUG: ETH DHCP: ETH NOT FOUND:"));
-          server.println(F("      Ethernet shield was not found"));
+          // server.println(F("DEBUG: ETH DHCP: ETH NOT FOUND:"));
+          // server.println(F("      Ethernet shield was not found"));
           enableLora = true;
         }
         else if (Ethernet.linkStatus() == LinkOFF)
         {
-          server.println(F("DEBUG: ETH DHCP:"));
-          server.println(F("      Ethernet cable is not connected..."));
-          // enableLora = true;
+          // server.println(F("DEBUG: ETH DHCP:"));
+          // server.println(F("      Ethernet cable is not connected..."));
+          //  enableLora = true;
         }
       }
-      server.print(F("      DHCP IP : "));
-      server.println(Ethernet.localIP());
+      // server.print(F("      DHCP IP : "));
+      // server.println(Ethernet.localIP());
     }
     else if (enableConverter)
     {
@@ -1137,11 +1137,11 @@ bool checkSendMode()
       saveIPSerial = ipSerial.fromString(ipAddres);
       if (serialModeEthClient.connect(ipSerial, portEthSerial))
       {
-        server.println("Server Serial Converter Connected");
+        // server.println("Server Serial Converter Connected");
       }
       else
       {
-        server.println("Server Serial Converter Failed");
+        // server.println("Server Serial Converter Failed");
       }
     }
     else if (!enableConverter)
@@ -1151,9 +1151,9 @@ bool checkSendMode()
       saveIPAddress = ipNetmask.fromString(netMask);
       saveIPAddress = ipDNS.fromString(DNS);
       Ethernet.begin(mac, ipStatic, ipDNS, ipGateway, ipNetmask);
-      server.println(F("DEBUG: ETH STATIC: USE STATIC"));
-      server.print(F("      STATIC IP : "));
-      server.println(Ethernet.localIP());
+      // server.println(F("DEBUG: ETH STATIC: USE STATIC"));
+      // server.print(F("      STATIC IP : "));
+      // server.println(Ethernet.localIP());
     }
     // NTP SET
     timeClient.begin();
@@ -1368,23 +1368,23 @@ void kwh_SendConnect()
   cmd_trigMeter();
   Serial2.flush();
   delay(100);
-  server.println(F("kwh_SendConnect()"));
+  // server.println(F("kwh_SendConnect()"));
   step_ = kwhStep::Connected;
 }
 
 void kwh_sendLogin()
 {
-  server.println(F("kwh_sendLogin()"));
+  // server.println(F("kwh_sendLogin()"));
   cmd_logonMeter();
   Serial2.flush();
   delay(100);
-  server.println(F("SEND LOGIN"));
+  // server.println(F("SEND LOGIN"));
   step_ = kwhStep::LoginACK;
 }
 
 void kwh_readACK()
 {
-  server.print(F("kwh_readACK() -> "));
+  // server.print(F("kwh_readACK() -> "));
   char charACK[MAX_ACK_CHAR];
   char flushRX;
   if (Serial2.available() > 0)
@@ -1392,23 +1392,23 @@ void kwh_readACK()
     flushRX = Serial2.read();
   }
   size_t len = Serial2.readBytesUntil(ETX, charACK, MAX_ACK_CHAR);
-  server.println(charACK);
+  // server.println(charACK);
 
   if (charACK[0] == ACK or charACK[1] == ACK)
   {
     if (step_ == kwhStep::Connected)
     {
-      server.println(F("ACK RECEIVED - kwhStep::Connected"));
+      // server.println(F("ACK RECEIVED - kwhStep::Connected"));
       step_ = kwhStep::SendLogin;
     }
     else if (step_ == kwhStep::LoginACK)
     {
-      server.println(F("ACK RECEIVED - kwhStep::LoginACK"));
+      // server.println(F("ACK RECEIVED - kwhStep::LoginACK"));
       step_ = kwhStep::SendRegister;
     }
     else if (step_ == kwhStep::AfterData)
     {
-      server.println(F("ACK RECEIVED - kwhStep::AfterData"));
+      // server.println(F("ACK RECEIVED - kwhStep::AfterData"));
       step_ = kwhStep::LogoutACK;
     }
   }
@@ -1416,7 +1416,7 @@ void kwh_readACK()
 
 void kwh_parseData()
 {
-  server.println(F("kwh_parseData()"));
+  // server.println(F("kwh_parseData()"));
   char charData[MAX_RX_CHARS];
   char buffData[MAX_KWH_CHAR];
   createSafeString(outParse, 8);
@@ -1424,20 +1424,35 @@ void kwh_parseData()
   char s[16];
   uint32_t value;
 
+  // if (Serial2.available() > 0)
+  // {
+  //   // server.println(Serial2.read());
+
   size_t len = Serial2.readBytesUntil(ETX, charData, MAX_RX_CHARS);
-  // if (len < 9)
+  //   server.println(charData);
+  // }
+  server.println(len);
+  if (len < 9)
+  {
+    if (Serial2.available() > 0)
+    {
+      flushRX = Serial2.read();
+      server.println(flushRX);
+    }
+    size_t len2 = Serial2.readBytesUntil(ETX, charData, MAX_RX_CHARS);
+    server.println(len2);
+  }
+  //   if (len2 < 9)
   // {
   //   if (Serial2.available() > 0)
   //   {
   //     flushRX = Serial2.read();
   //   }
+  //   size_t len3 = Serial2.readBytesUntil(ETX, charData, MAX_RX_CHARS);
+  //    server.println(len3);
+  // }
   // }
 
-  if (len < 9)
-  {
-  }
-
-  server.println(len);
   server.println(charData);
 
   switch (regStep_)
@@ -1459,9 +1474,9 @@ void kwh_parseData()
     }
     // server.print(F("     "));
     // server.println(buffData);
-    // server.print(convert((byte)buffData)); using union
+    // //server.print(convert((byte)buffData)); using union
 
-    server.println(outParse);
+    // server.println(outParse);
     value = strtoul(outParse.c_str(), NULL, 16);
     dtostrf(ConvertB32ToFloat(value), 1, 0, outKWHA);
     server.println(outKWHA);
@@ -1486,7 +1501,7 @@ void kwh_parseData()
     // server.print(F("     "));
     // server.println(buffData);
 
-    server.println(outParse);
+    // server.println(outParse);
     value = strtoul(outParse.c_str(), NULL, 16);
     dtostrf(ConvertB32ToFloat(value), 1, 0, outKWHB);
     server.println(outKWHB);
@@ -1508,10 +1523,10 @@ void kwh_parseData()
       server.print(F(" | BUFFDATA ="));
       server.println(buffData[i], HEX);
     }
-    // server.print(F("     "));
-    // server.println(buffData);
+    // //server.print(F("     "));
+    // //server.println(buffData);
 
-    server.println(outParse);
+    // server.println(outParse);
     value = strtoul(outParse.c_str(), NULL, 16);
     dtostrf(ConvertB32ToFloat(value), 1, 0, outKWHTOT);
     server.println(outKWHTOT);
@@ -1528,19 +1543,19 @@ void kwh_readRegister()
   switch (regStep_)
   {
   case kwhRegisterStep::KWHA:
-    server.println(F("READ KWHA"));
+    // server.println(F("READ KWHA"));
     kwh_parseData();
     step_ = kwhStep::SendRegister;
     regStep_ = kwhRegisterStep::KWHB;
     break;
   case kwhRegisterStep::KWHB:
-    server.println(F("READ KWHB"));
+    // server.println(F("READ KWHB"));
     kwh_parseData();
     step_ = kwhStep::SendRegister;
     regStep_ = kwhRegisterStep::KWHTOTAL;
     break;
   case kwhRegisterStep::KWHTOTAL:
-    server.println(F("READ KWHTOTAL"));
+    // server.println(F("READ KWHTOTAL"));
     kwh_parseData();
     step_ = kwhStep::AfterData;
     break;
@@ -1552,21 +1567,21 @@ void kwh_sendRegister()
   switch (regStep_)
   {
   case kwhRegisterStep::KWHA:
-    server.println(F("SEND REGISTER KWHA"));
+    // server.println(F("SEND REGISTER KWHA"));
     cmd_readRegister(regKWHA);
     Serial2.flush();
     delay(100);
     step_ = kwhStep::ReadRegister;
     break;
   case kwhRegisterStep::KWHB:
-    server.println(F("SEND REGISTER KWHB"));
+    // server.println(F("SEND REGISTER KWHB"));
     cmd_readRegister(regKWHB);
     Serial2.flush();
     delay(100);
     step_ = kwhStep::ReadRegister;
     break;
   case kwhRegisterStep::KWHTOTAL:
-    server.println(F("SEND REGISTER KWH TOTAL"));
+    // server.println(F("SEND REGISTER KWH TOTAL"));
     cmd_readRegister(regKWHTOT);
     Serial2.flush();
     delay(100);
@@ -1577,14 +1592,14 @@ void kwh_sendRegister()
 
 void kwh_sendLogout()
 {
-  server.println(F("SEND LOGOUT"));
+  // server.println(F("SEND LOGOUT"));
   cmd_logoffMeter();
   kwh_readACK();
 }
 
 void kwh_lastStep()
 {
-  server.println(F("KWH LOGOUT -> ACK"));
+  // server.println(F("KWH LOGOUT -> ACK"));
   return kwh_change_status(kwhStatus::Ok);
 }
 
@@ -1598,7 +1613,8 @@ void kwh_loop()
   case kwhStep::Ready: /* nothing to do, this should never happen */
     break;
   case kwhStep::Started:
-    kwh_SendConnect();
+    // kwh_SendConnect();
+    kwh_sendLogin();
     break;
   case kwhStep::Connected:
     kwh_readACK();
@@ -1616,7 +1632,8 @@ void kwh_loop()
     kwh_readRegister();
     break;
   case kwhStep::AfterData:
-    kwh_sendLogout();
+    kwh_lastStep();
+    break;
   case kwhStep::LogoutACK:
     kwh_lastStep();
     break;
@@ -1626,7 +1643,7 @@ void kwh_loop()
 bool kwh_getSerialNumber()
 {
   bool getSerialSuccess = false;
-  server.print(F("kwh_getSerialNumber() -> "));
+  // server.print(F("kwh_getSerialNumber() -> "));
   cmd_logonMeter();
   char charACK[MAX_ACK_CHAR];
   char charData[MAX_RX_CHARS];
@@ -1636,39 +1653,39 @@ bool kwh_getSerialNumber()
     flushRX = Serial2.read();
   }
   size_t len = Serial2.readBytesUntil(ETX, charACK, MAX_ACK_CHAR);
-  server.println(len);
-  server.println(charACK[0]);
+  // server.println(len);
+  // server.println(charACK[0]);
   if (charACK[1] == CAN)
   {
-    server.println(F("CAN CANCEL."));
+    // server.println(F("CAN CANCEL."));
     getSerialSuccess = false;
   }
   else if (charACK[1] == ACK)
   {
-    server.println(F("ACK RECEIVED"));
-    server.println(F("      READ  - SERIAL NUMBER."));
+    // server.println(F("ACK RECEIVED"));
+    // server.println(F("      READ  - SERIAL NUMBER."));
     cmd_readRegister(regSerNum);
     if (Serial2.available() > 0)
     {
       flushRX = Serial2.read();
     }
     size_t lens = Serial2.readBytesUntil(ETX, charData, MAX_RX_CHARS);
-    server.println(lens);
-    server.println(charData[1]);
+    // server.println(lens);
+    // server.println(charData[1]);
     if (charData[1] == CHAR_REGREAD)
     {
-      server.println(F("     DATA SERIAL NUMBER"));
+      // server.println(F("     DATA SERIAL NUMBER"));
       for (size_t i = 0; i < SERIALNUM_CHAR; i++)
       {
         outSerialNumber[i] = charData[i + 5];
-        server.print(F("     DATA ke "));
-        server.print(i);
-        server.print(F(" > "));
-        server.println(outSerialNumber[i], HEX);
+        // server.print(F("     DATA ke "));
+        // server.print(i);
+        // server.print(F(" > "));
+        // server.println(outSerialNumber[i], HEX);
       }
-      server.print(F("     "));
-      server.println(outSerialNumber);
-      //   break;
+      // server.print(F("     "));
+      // server.println(outSerialNumber);
+      //    break;
       getSerialSuccess = true;
     }
     else
@@ -1698,12 +1715,14 @@ bool kwhSend = false;
 // NTP SECOND
 void BackgroundDelay()
 {
-  // server.println(timeClient.getFormattedTime());
-  if (timeClient.getSeconds() == 5)
+  // //server.println(timeClient.getFormattedTime());
+  // if (timeClient.getSeconds() == 5)
+  if (millis() - previousMillis > interval)
   {
     kwh_ready();
     kwhReadReady = true;
     kwhSend = true;
+    previousMillis = millis();
   }
 }
 
@@ -1720,19 +1739,19 @@ void setup()
   FlashFS.begin(true);
 #endif
   //
-  // server.println(enableLora);
+  // //server.println(enableLora);
   // if (enableLora)
   // {
-  //   server.println("ENABLE LORA");
+  //   //server.println("ENABLE LORA");
   if (!lora.init())
   {
-    server.println("RFM95 not detected");
+    // server.println("RFM95 not detected");
   }
   // loraConf();
   // }
   // else if (enableLAN)
   // {
-  // server.println("ENABLE LAN");
+  // //server.println("ENABLE LAN");
   Ethernet.init(csEth2);
   // }
 
@@ -1785,7 +1804,7 @@ void setup()
   }
 
   else
-  { // server.println("load error");
+  { // //server.println("load error");
   }
   config.apid = "MEL_AMR0001";
   config.hostName = "MEL_AMR0001";
@@ -1798,10 +1817,10 @@ void setup()
   portal.disableMenu(AC_MENUITEM_RESET | AC_MENUITEM_HOME);
   //  portal.load(FPSTR(PAGE_HELLO));
 
-  // server.print("WiFi ");
+  // //server.print("WiFi ");
   if (portal.begin())
   {
-    //      server.print("IP:" + WiFi.localIP().toString());
+    //      //server.print("IP:" + WiFi.localIP().toString());
     config.bootUri = AC_ONBOOTURI_HOME;
   }
   else
@@ -1820,7 +1839,7 @@ void setup()
       kwhID = String(outSerialNumber);
     else
       return;
-    server.println(kwhID);
+    // server.println(kwhID);
   }
 
 } // setup
@@ -1837,29 +1856,29 @@ void loop()
 
   if (status == kwhStatus::Ready and kwhReadReady /*and timeClient.getSeconds() == 5*/)
   {
-    server.println(F("READ STATUS::READY"));
+    // server.println(F("READ STATUS::READY"));
     kwh_start_reading();
   }
   else if (status == kwhStatus::Ok)
   {
-    // server.println(F("READ STATUS::OK"));
+    // //server.println(F("READ STATUS::OK"));
 
     read_just_completed = true; /* Read completed successfully */
     next_delay = READ_DELAY;    /* Reset delay to default */
     kwhReadReady = false;
     if (kwhSend)
     {
-      server.print(F("Data Akhir - "));
-      server.print(F("customerID - "));
-      server.print(customerID);
-      server.print(F("kwhID - "));
-      server.print(kwhID);
-      server.print(F("outKWHA - "));
-      server.print(outKWHA);
-      server.print(F("outKWHB - "));
-      server.print(outKWHB);
-      server.print(F("outKWHTOT - "));
-      server.println(outKWHTOT);
+      // server.print(F("Data Akhir - "));
+      // server.print(F("customerID - "));
+      // server.print(customerID);
+      // server.print(F("kwhID - "));
+      // server.print(kwhID);
+      // server.print(F("outKWHA - "));
+      // server.print(outKWHA);
+      // server.print(F("outKWHB - "));
+      // server.print(outKWHB);
+      // server.print(F("outKWHTOT - "));
+      // server.println(outKWHTOT);
       String dataKirim = "*" + customerID + "*" + kwhID + "*" + String(outKWHA) + "*" + String(outKWHB) + "*" + String(outKWHTOT) + "#";
 
       if (enableLAN)
@@ -1882,7 +1901,7 @@ void loop()
     {
       next_delay = 60 * 1000;
     }
-    // server.println(F("READ STATUS::BUSY"));
+    // //server.println(F("READ STATUS::BUSY"));
 
     // kwh_ready();
   }
