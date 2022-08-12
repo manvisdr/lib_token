@@ -478,14 +478,14 @@ bool GetSerialChar(char *pDest, unsigned long *pTimer)
 
 } // GetSerialChar
 
+// CheckTimeout
 bool CheckTimeout(unsigned long *timeNow, unsigned long *timeStart)
 {
   if (*timeNow - *timeStart >= CHAR_TIMEOUT)
     return true;
   else
     return false;
-
-} // CheckTimeout
+}
 
 void ServiceLED(void)
 {

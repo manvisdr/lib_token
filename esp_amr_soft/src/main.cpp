@@ -147,7 +147,7 @@ String customerID;
 String kwhID;
 String kwhType;
 String serverCheck;
-String channelId = "monKWH/AMR";
+const String channelId = "monKWH/AMR";
 String Port;
 String userKey;
 String apiKey;
@@ -174,8 +174,11 @@ bool enableLora;
 bool enableConverter;
 bool factoryReset;
 bool rebootDevice;
-unsigned int interval = 5000;
+const unsigned int interval = 5000;
+const unsigned int interval_cek_konek = 2000;
+const unsigned int interval_record = 10000;
 long previousMillis = 0;
+long previousMillis1 = 0;
 bool saveIPAddress;
 bool saveIPSerial;
 
@@ -219,6 +222,12 @@ char rxTextFrame[BUFF_SIZE];
 bool bLED;
 unsigned long timeLED;
 bool getKWHData = false;
+bool flagSTX = false;
+
+bool mode_checked = false;
+bool getSerialSuccess = false;
+bool kwhReadReady = false;
+bool kwhSend = false;
 
 static const char AUX_mqtt_setting[] PROGMEM = R"raw(
 [
@@ -686,6 +695,7 @@ static const char AUX_profile_setting[] PROGMEM = R"raw(
 void ReceiveStateMachine(void);
 bool GetSerialChar(char *pDest, unsigned long *pTimer);
 bool CheckTimeout(unsigned long *timeNow, unsigned long *timeStart);
+void kwh_ready(void);
 
 bool mqttConnectEth()
 {
@@ -717,7 +727,7 @@ bool mqttConnectEth()
     {
       if (!--retry)
         break;
-      delay(3000);
+      // delay(3000);
     }
   }
   return false;
@@ -1038,7 +1048,7 @@ void handleReset()
   AutoConnectAux &mqtt_setting = *portal.aux(AUX_SETTING_URI);
   getParams(mqtt_setting);
 
-  mqtt_setting["mqttserver"].value = "207.148.122.42";
+  mqtt_setting["mqttserver"].value = "203.194.112.238";
   mqtt_setting["port"].value = String(1883);
   mqtt_setting["userkey"].value = "mgidas";
   mqtt_setting["apikey"].value = String(1234509876);
@@ -1123,6 +1133,10 @@ bool checkSendMode()
         }
         else if (Ethernet.linkStatus() == LinkOFF)
         {
+          while (true)
+          {
+            delay(1);
+          }
           // server.println(F("DEBUG: ETH DHCP:"));
           // server.println(F("      Ethernet cable is not connected..."));
           //  enableLora = true;
@@ -1167,9 +1181,11 @@ bool checkSendMode()
 
 short gencrc_16(short i)
 {
-  short j;
-  short k;
-  short crc;
+  short
+      j,
+      k,
+      crc;
+
   k = i << 8;
   crc = 0;
   for (j = 0; j < 8; j++)
@@ -1214,8 +1230,9 @@ void send_byte(unsigned char d)
 
 void send_cmd(unsigned char *cmd, unsigned short len)
 {
-  unsigned short i;
-  unsigned short crc;
+  unsigned short
+      i,
+      crc;
   /*
    * Add the STX and start the CRC calc.
    */
@@ -1261,15 +1278,19 @@ bool cmd_logoffMeter()
 
 void cmd_readRegister(const byte *reg)
 {
-  unsigned char readReg[3] = {0x52, reg[0], reg[1]};
+  unsigned char
+      readReg[3] = {0x52, reg[0], reg[1]};
   send_cmd(readReg, sizeof(readReg));
 }
 
 float ConvertB32ToFloat(uint32_t b32)
 {
-  float result;
-  int32_t shift;
-  uint16_t bias;
+  float
+      result;
+  int32_t
+      shift;
+  uint16_t
+      bias;
 
   if (b32 == 0)
     return 0.0;
@@ -1297,6 +1318,7 @@ float ConvertB32ToFloat(uint32_t b32)
 
 enum class kwhStatus : uint8_t
 {
+  NotReady,
   Ready,
   Busy,
   Ok,
@@ -1304,6 +1326,7 @@ enum class kwhStatus : uint8_t
   Notlogin,
   ProtocolError,
   ChecksumError,
+  EndRead,
 };
 
 enum class kwhStep : uint8_t
@@ -1329,21 +1352,106 @@ enum class kwhRegisterStep : uint8_t
   KWHTOTAL,
 };
 
-size_t errors_ = 0, checksum_errors_ = 0, successes_ = 0;
-kwhStatus status_;
-kwhStep step_;
-kwhRegisterStep regStep_;
+size_t
+    notconnect = 0,
+    errors_ = 0,
+    checksum_errors_ = 0,
+    successes_ = 0;
+
+kwhStatus
+    status_;
+kwhStep
+    step_;
+kwhRegisterStep
+    regStep_;
+
+// CheckTimeout
+bool CheckTimeout(unsigned long *timeNow, unsigned long *timeStart)
+{
+  if (*timeNow - *timeStart >= CHAR_TIMEOUT)
+    return true;
+  else
+    return false;
+
+} // CheckTimeout
+
+bool kwh_CheckConnect()
+{
+  bool
+      kwhconnect;
+  static unsigned long
+      timeRX;
+  unsigned long
+      timeNow;
+  char
+      charACK[MAX_ACK_CHAR],
+      flushRX;
+  size_t
+      len;
+
+  timeNow = millis();
+  cmd_trigMeter();
+  timeRX = timeNow;
+
+  if (Serial2.available() > 0)
+  {
+    flushRX = Serial2.read();
+  }
+  len = Serial2.readBytesUntil(ETX, charACK, MAX_ACK_CHAR);
+  // server.println(charACK);
+
+  if (charACK[0] == ACK or charACK[1] == ACK)
+  {
+    kwhconnect = true;
+    server.println("ACK RECEIVED");
+  }
+
+  // if (Serial2.available())
+  // {
+  //   // server.println("serial availble");
+  //   // if (Serial2.available() > 3)
+  //   // {
+  //   len = Serial2.readBytesUntil(ETX, charACK, MAX_ACK_CHAR);
+  //   // server.print(charACK);
+
+  //   if (len > 2)
+  //   {
+  //     server.print("LEN = ");
+  //     server.print(len);
+  //     server.print(" DATA = ");
+  //     server.print(charACK[0]);
+  //     server.print(charACK[1]);
+  //     server.println(charACK[2]);
+  //     if (charACK[1] == ACK)
+  //       kwhconnect = true;
+  //   }
+
+  //   else
+  //     flushRX = Serial2.read();
+
+  else
+  {
+    server.print("data kosong");
+    kwhconnect = false;
+    // if (CheckTimeout(&timeNow, &timeRX))
+    // {
+    //   kwhconnect = false;
+    //   status_ = kwhStatus::NotReady;
+    // }
+  }
+  return kwhconnect;
+}
 
 void kwh_ready()
 {
-  if (status_ != kwhStatus::Busy)
+  if (status_ != kwhStatus::Busy /*or status_ != kwhStatus::NotReady*/)
     status_ = kwhStatus::Ready;
 }
 
 void kwh_start_reading()
 {
   /* Don't allow starting a read when one is already in progress */
-  if (status_ == kwhStatus::Busy)
+  if (status_ == kwhStatus::Busy /*or status_ != kwhStatus::NotReady*/)
     return;
 
   status_ = kwhStatus::Busy;
@@ -1385,13 +1493,17 @@ void kwh_sendLogin()
 void kwh_readACK()
 {
   // server.print(F("kwh_readACK() -> "));
-  char charACK[MAX_ACK_CHAR];
-  char flushRX;
+  char
+      charACK[MAX_ACK_CHAR];
+  char
+      flushRX;
+  size_t
+      len;
   if (Serial2.available() > 0)
   {
     flushRX = Serial2.read();
   }
-  size_t len = Serial2.readBytesUntil(ETX, charACK, MAX_ACK_CHAR);
+  len = Serial2.readBytesUntil(ETX, charACK, MAX_ACK_CHAR);
   // server.println(charACK);
 
   if (charACK[0] == ACK or charACK[1] == ACK)
@@ -1417,31 +1529,135 @@ void kwh_readACK()
 void kwh_parseData()
 {
   // server.println(F("kwh_parseData()"));
-  char charData[MAX_RX_CHARS];
-  char buffData[MAX_KWH_CHAR];
+  static unsigned long
+      timeRX;
+  unsigned long
+      timeNow;
+  char
+      charData[MAX_RX_CHARS];
+  char
+      buffData[MAX_KWH_CHAR];
   createSafeString(outParse, 8);
-  char flushRX;
-  char s[16];
-  uint32_t value;
+  byte
+      flushRX;
+  char
+      s[16];
+  uint32_t
+      value;
+  size_t
+      len,
+      len2;
 
-  // if (Serial2.available() > 0)
-  // {
-  //   // server.println(Serial2.read());
+  // if (displayPort.available())
+  //   {
+  //     inChar = (byte)displayPort.read();
 
-  size_t len = Serial2.readBytesUntil(ETX, charData, MAX_RX_CHARS);
+  //     if (inChar == STX) // start of message?
+  //     {
+
+  if (Serial2.available() > 0)
+  {
+    if (Serial2.read() == STX)
+    {
+      len = Serial2.readBytesUntil(ETX, charData, MAX_RX_CHARS);
+      server.println(len);
+      // server.print(charData[0], HEX);
+      // server.print(charData[1], HEX);
+      // server.print(charData[2], HEX);
+      // server.print(charData[3], HEX);
+      // server.println(charData[4], HEX);
+      switch (regStep_)
+      {
+
+      case kwhRegisterStep::KWHA:
+        server.println(F("     DATA KWH_A "));
+        for (size_t i = 0; i < len; i++)
+        {
+          // server.print(charData[i], HEX);
+
+          buffData[i] = charData[i + 3];
+          outParse += "0123456789ABCDEF"[buffData[i] / 16];
+          outParse += "0123456789ABCDEF"[buffData[i] % 16];
+          server.print(F("     DATA ke "));
+          server.print(i);
+          server.print(F(" > "));
+          server.print(charData[i + 3], HEX);
+          server.print(F(" | BUFFDATA ="));
+          server.println(buffData[i], HEX);
+        }
+        // server.println(" ");
+        value = strtoul(outParse.c_str(), NULL, 16);
+        dtostrf(round(ConvertB32ToFloat(value)), 1, 0, outKWHA);
+        server.println(outKWHA);
+        outParse.clear();
+
+        break;
+
+      case kwhRegisterStep::KWHB:
+        server.println(F("     DATA KWH_B "));
+        for (size_t i = 0; i < len; i++)
+        {
+          // server.print(charData[i], HEX);
+          buffData[i] = charData[i + 4];
+          outParse += "0123456789ABCDEF"[buffData[i] / 16];
+          outParse += "0123456789ABCDEF"[buffData[i] % 16];
+          server.print(F("     DATA ke "));
+          server.print(i);
+          server.print(F(" > "));
+          server.print(charData[i + 4], HEX);
+          server.print(F(" | BUFFDATA ="));
+          server.println(buffData[i], HEX);
+        }
+        // server.println(" ");
+        value = strtoul(outParse.c_str(), NULL, 16);
+        dtostrf(round(ConvertB32ToFloat(value)), 1, 0, outKWHB);
+        server.println(outKWHB);
+        outParse.clear();
+
+        break;
+
+      case kwhRegisterStep::KWHTOTAL:
+        server.println(F("     DATA KWH_T "));
+        for (size_t i = 0; i < len; i++)
+        {
+          // server.print(charData[i], HEX);
+          buffData[i] = charData[i + 3];
+          outParse += "0123456789ABCDEF"[buffData[i] / 16];
+          outParse += "0123456789ABCDEF"[buffData[i] % 16];
+          server.print(F("     DATA ke "));
+          server.print(i);
+          server.print(F(" > "));
+          server.print(charData[i + 3], HEX);
+          server.print(F(" | BUFFDATA ="));
+          server.println(buffData[i], HEX);
+        }
+        // server.println(" ");
+        value = strtoul(outParse.c_str(), NULL, 16);
+        dtostrf(round(ConvertB32ToFloat(value)), 1, 0, outKWHTOT);
+        server.println(outKWHTOT);
+        outParse.clear();
+
+        break;
+      }
+      // }
+      memset(charData, 0x00, MAX_RX_CHARS); // array is reset to 0s.
+      memset(buffData, 0x00, MAX_KWH_CHAR);
+    }
+  }
+
   //   server.println(charData);
   // }
-  server.println(len);
-  if (len < 9)
-  {
-    if (Serial2.available() > 0)
-    {
-      flushRX = Serial2.read();
-      server.println(flushRX);
-    }
-    size_t len2 = Serial2.readBytesUntil(ETX, charData, MAX_RX_CHARS);
-    server.println(len2);
-  }
+  // server.println(len);
+  // if (len < 9)
+  // {
+  //   if (Serial2.available() > 0)
+  //   {
+  //     flushRX = Serial2.read();
+  //     server.println(flushRX);
+  //   }
+  //   len2 = Serial2.readBytesUntil(ETX, charData, MAX_RX_CHARS);
+  //   server.println(len2);
+  // }
   //   if (len2 < 9)
   // {
   //   if (Serial2.available() > 0)
@@ -1453,89 +1669,8 @@ void kwh_parseData()
   // }
   // }
 
-  server.println(charData);
-
-  switch (regStep_)
-  {
-
-  case kwhRegisterStep::KWHA:
-    server.println(F("     DATA KWH_A "));
-    for (size_t i = 0; i < MAX_KWH_CHAR; i++)
-    {
-      buffData[i] = charData[i + 4];
-      outParse += "0123456789ABCDEF"[buffData[i] / 16];
-      outParse += "0123456789ABCDEF"[buffData[i] % 16];
-      server.print(F("     DATA ke "));
-      server.print(i);
-      server.print(F(" > "));
-      server.print(charData[i + 4], HEX);
-      server.print(F(" | BUFFDATA ="));
-      server.println(buffData[i], HEX);
-    }
-    // server.print(F("     "));
-    // server.println(buffData);
-    // //server.print(convert((byte)buffData)); using union
-
-    // server.println(outParse);
-    value = strtoul(outParse.c_str(), NULL, 16);
-    dtostrf(ConvertB32ToFloat(value), 1, 0, outKWHA);
-    server.println(outKWHA);
-    outParse.clear();
-
-    break;
-
-  case kwhRegisterStep::KWHB:
-    server.println(F("     DATA KWH_B "));
-    for (size_t i = 0; i < MAX_KWH_CHAR; i++)
-    {
-      buffData[i] = charData[i + 5];
-      outParse += "0123456789ABCDEF"[buffData[i] / 16];
-      outParse += "0123456789ABCDEF"[buffData[i] % 16];
-      server.print(F("     DATA ke "));
-      server.print(i);
-      server.print(F(" > "));
-      server.print(charData[i + 5], HEX);
-      server.print(F(" | BUFFDATA ="));
-      server.println(buffData[i], HEX);
-    }
-    // server.print(F("     "));
-    // server.println(buffData);
-
-    // server.println(outParse);
-    value = strtoul(outParse.c_str(), NULL, 16);
-    dtostrf(ConvertB32ToFloat(value), 1, 0, outKWHB);
-    server.println(outKWHB);
-    outParse.clear();
-
-    break;
-
-  case kwhRegisterStep::KWHTOTAL:
-    server.println(F("     DATA KWH_T "));
-    for (size_t i = 0; i < MAX_KWH_CHAR; i++)
-    {
-      buffData[i] = charData[i + 4];
-      outParse += "0123456789ABCDEF"[buffData[i] / 16];
-      outParse += "0123456789ABCDEF"[buffData[i] % 16];
-      server.print(F("     DATA ke "));
-      server.print(i);
-      server.print(F(" > "));
-      server.print(charData[i + 4], HEX);
-      server.print(F(" | BUFFDATA ="));
-      server.println(buffData[i], HEX);
-    }
-    // //server.print(F("     "));
-    // //server.println(buffData);
-
-    // server.println(outParse);
-    value = strtoul(outParse.c_str(), NULL, 16);
-    dtostrf(ConvertB32ToFloat(value), 1, 0, outKWHTOT);
-    server.println(outKWHTOT);
-    outParse.clear();
-
-    break;
-  }
-  memset(charData, 0x00, MAX_RX_CHARS); // array is reset to 0s.
-  memset(buffData, 0x00, MAX_KWH_CHAR);
+  // if (charData[0] == CHAR_REGREAD or charData[0] == CHAR_REGREAD)
+  // {
 }
 
 void kwh_readRegister()
@@ -1642,17 +1777,24 @@ void kwh_loop()
 
 bool kwh_getSerialNumber()
 {
-  bool getSerialSuccess = false;
+  bool
+      getSerialSuccess = false;
+  char
+      charACK[MAX_ACK_CHAR];
+  char
+      charData[MAX_RX_CHARS];
+  char flushRX;
+  size_t
+      len,
+      lens;
   // server.print(F("kwh_getSerialNumber() -> "));
   cmd_logonMeter();
-  char charACK[MAX_ACK_CHAR];
-  char charData[MAX_RX_CHARS];
-  char flushRX;
+
   if (Serial2.available() > 0)
   {
     flushRX = Serial2.read();
   }
-  size_t len = Serial2.readBytesUntil(ETX, charACK, MAX_ACK_CHAR);
+  len = Serial2.readBytesUntil(ETX, charACK, MAX_ACK_CHAR);
   // server.println(len);
   // server.println(charACK[0]);
   if (charACK[1] == CAN)
@@ -1669,7 +1811,7 @@ bool kwh_getSerialNumber()
     {
       flushRX = Serial2.read();
     }
-    size_t lens = Serial2.readBytesUntil(ETX, charData, MAX_RX_CHARS);
+    lens = Serial2.readBytesUntil(ETX, charData, MAX_RX_CHARS);
     // server.println(lens);
     // server.println(charData[1]);
     if (charData[1] == CHAR_REGREAD)
@@ -1693,11 +1835,29 @@ bool kwh_getSerialNumber()
   }
   return getSerialSuccess;
 }
-
+bool kwh_Connectlive = false;
 void backgroundTask(void)
 {
+  portal.handleClient();
   timeClient.update();
 
+  while (Ethernet.linkStatus() == LinkOFF)
+  {
+    if (checkDHCP)
+    {
+      Ethernet.begin(0);
+    }
+    else
+    {
+      Ethernet.begin(mac, ipStatic, ipDNS, ipGateway, ipNetmask);
+    }
+  }
+
+  // if (millis() - previousMillis1 > interval_cek_konek and (!kwhSend and !kwhReadReady))
+  // {
+  //   kwh_Connectlive = kwh_CheckConnect();
+  //   previousMillis1 = millis();
+  // }
   if (!mqttClientEth.loop()) /* PubSubClient::loop() returns false if not connected */
   {
     mqttConnectEth();
@@ -1705,24 +1865,28 @@ void backgroundTask(void)
 
   if (enableLora)
     lora.update();
-  portal.handleClient();
 }
 
-bool mode_checked = false;
-bool getSerialSuccess = false;
-bool kwhReadReady = false;
-bool kwhSend = false;
 // NTP SECOND
 void BackgroundDelay()
 {
   // //server.println(timeClient.getFormattedTime());
   // if (timeClient.getSeconds() == 5)
-  if (millis() - previousMillis > interval)
+  if (millis() - previousMillis > interval_record)
   {
+    // if (kwh_Connectlive)
+    // {
     kwh_ready();
     kwhReadReady = true;
     kwhSend = true;
+    // }
+    // else
+    // {
+    //   kwhReadReady = false;
+    //   kwhSend = false;
+    // }
     previousMillis = millis();
+    // }
   }
 }
 
