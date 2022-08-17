@@ -1,5 +1,7 @@
 #include <Arduino.h>
 #include <SafeString.h>
+#include <EDMICmdLine.h>
+
 #define RXD2 16 // PIN RX2
 #define TXD2 17 // PIN TX2
 
@@ -516,7 +518,7 @@ void kwh_parseData()
 
     Serial.println(outParse);
     value = strtoul(outParse.c_str(), NULL, 16);
-    dtostrf(convert((byte)buffData), 1, 0, outKWHA);
+    // dtostrf(convert((byte)buffData), 1, 0, outKWHA);
     Serial.println(outKWHA);
     outParse.clear();
 
@@ -541,7 +543,7 @@ void kwh_parseData()
 
     Serial.println(outParse);
     value = strtoul(outParse.c_str(), NULL, 16);
-    dtostrf(convert((byte)buffData), 1, 0, outKWHB);
+    // dtostrf(convert((byte)buffData), 1, 0, outKWHB);
     Serial.println(outKWHB);
     outParse.clear();
 
@@ -566,7 +568,7 @@ void kwh_parseData()
 
     Serial.println(outParse);
     value = strtoul(outParse.c_str(), NULL, 16);
-    dtostrf(convert((byte)buffData), 1, 0, outKWHTOT);
+    // dtostrf(convert((byte)buffData), 1, 0, outKWHTOT);
     Serial.println(outKWHTOT);
     outParse.clear();
 
@@ -727,13 +729,24 @@ bool kwh_getSerialNumber()
   }
   return getSerialSuccess;
 }
-
+const unsigned int interval = 5000;
+const unsigned int interval_cek_konek = 2000;
+const unsigned int interval_record = 10000;
+long previousMillis = 0;
+long previousMillis1 = 0;
 void do_background_tasks()
 {
   // if (!mqtt.loop()) /* PubSubClient::loop() returns false if not connected */
   // {
   //   mqtt_connect();
   // }
+  EdmiCMDReader::Status status = edmiread.status();
+  edmiread.step_trigger();
+  if (millis() - previousMillis > interval_record and status == EdmiCMDReader::Status::Connect)
+  {
+    edmiread.read_default();
+    previousMillis = millis();
+  }
 }
 
 void delay_handle_background(long time)
@@ -746,135 +759,126 @@ void delay_handle_background(long time)
   }
 }
 
-void recSerialUntilETX()
+boolean readChar(unsigned int timeout, byte *inChar)
 {
-  char mData[20];
-  // byte n = Serial2.available(); // check that a data item has arrived from sender
-  // if (n != 0)
-  // {
+  unsigned long currentMillis = millis();
+  unsigned long previousMillis = currentMillis;
 
-  byte m = Serial2.readBytesUntil(0x03, mData, 20); // 0x03 is not saved
-  mData[m] = '\0';                                  // insert null-charcater;
-  Serial.println(mData);
-  // }
+  while (currentMillis - previousMillis < timeout)
+  {
+    if (Serial2.available())
+    {
+      (*inChar) = (byte)Serial2.read();
+      return true;
+    }
+    currentMillis = millis();
+  } // while
+  return false;
+}
+
+boolean readMessage(char *message, int maxMessageSize, unsigned int timeout)
+{
+  byte inChar;
+  int index = 0;
+  boolean completeMsg = false;
+  byte checksum = 0;
+  bool dlechar = false;
+
+  unsigned long currentMillis = millis();
+  unsigned long previousMillis = currentMillis;
+
+  while (currentMillis - previousMillis < timeout)
+  {
+    if (Serial2.available())
+    {
+      inChar = (byte)Serial2.read();
+
+      if (inChar == STX) // start of message?
+      {
+        while (readChar(INTERCHAR_TIMEOUT, &inChar))
+        {
+          if (inChar != ETX)
+          {
+            if (inChar == DLE)
+              dlechar = true;
+            else
+            {
+              if (dlechar)
+                inChar &= 0xBF;
+              dlechar = false;
+              message[index] = inChar;
+              index++;
+              if (index == maxMessageSize) // buffer full
+                break;
+            }
+            // checksum = checksum + inChar;
+          }
+          else // got ETX, next character is the checksum
+          {
+            message[index] = '\0'; // good checksum, null terminate message
+            completeMsg = true;
+
+          } // next character is the checksum
+        }   // while read until ETX or timeout
+      }     // inChar == STX
+    }       // Serial2.available()
+    if (completeMsg)
+      break;
+    currentMillis = millis();
+  } // while
+  return completeMsg;
+}
+
+EdmiCMDReader edmiread(Serial2, RXD2, TXD2, "MK10E");
+const std::map<EdmiCMDReader::Status, std::string> METER_STATUS_MAP = {
+    {EdmiCMDReader::Status::Disconnect, "Disconnect"},
+    {EdmiCMDReader::Status::Connect, "Connect"},
+    {EdmiCMDReader::Status::Ready, "Ready"},
+    {EdmiCMDReader::Status::LoggedIn, "LoggedIn"},
+    {EdmiCMDReader::Status::NotLogin, "NotLogin"},
+    {EdmiCMDReader::Status::Busy, "Busy"},
+    {EdmiCMDReader::Status::Finish, "Finish"},
+    {EdmiCMDReader::Status::TimeoutError, "Err-Timeout"},
+    {EdmiCMDReader::Status::ProtocolError, "Err-Prot"},
+    {EdmiCMDReader::Status::ChecksumError, "Err-Chk"}};
+
+std::string EdmiCMDReaderStatus()
+{
+  EdmiCMDReader::Status status = edmiread.status();
+  auto it = METER_STATUS_MAP.find(status);
+  if (it == METER_STATUS_MAP.end())
+    return "Unknw";
+  return it->second;
 }
 
 char gg;
 bool getKWH = false;
 bool getKWHser = false;
 int count = 0;
-String kwhSerialNumber = "";
+String kwhSerialNumber;
+
 void setup()
 {
   Serial.begin(115200);
-  Serial2.begin(9600, SERIAL_8N1, RXD2, TXD2);
-
+  edmiread.begin(9600);
+  // Serial2.begin(9600, SERIAL_8N1, RXD2, TXD2);
   pinMode(pinLED, OUTPUT);
 
-  // cmd_trigMeter();
-  // char charACK[MAX_ACK_CHAR];
-  // char charData[MAX_RX_CHARS];
-  // char flushRX;
-  // if (Serial2.available() > 0)
-  // {
-  //   flushRX = Serial2.read();
-  // }
-  // cmd_logonMeter();
-  // size_t len = Serial2.readBytesUntil(ETX, charACK, MAX_ACK_CHAR);
-  // Serial.println(len);
-  // Serial.println(charACK[0]);
-
-  getKWHser = kwh_getSerialNumber();
-  Serial.println(getKWHser);
-  // getSerialNumber();
-  // cmd_logonMeter();
-
-  // if (Serial2.available() > 0)
-  // {
-  //   gg = Serial2.read();
-
-  //   // if (count == 0)
-  //   //   recSerialUntilETX();
-  // }
-  // recSerialUntilETX();
-  // // get_cmd(MAX_ACK_CHAR);
-
-  // cmd_logonMeter();
-  // if (Serial2.available() > 0)
-  // {
-  //   gg = Serial2.read();
-
-  //   // if (count == 0)
-  //   //   recSerialUntilETX();
-  // }
-  // recSerialUntilETX();
-  // // setup
+  // getKWHser = kwh_getSerialNumber();
+  // Serial.println(getKWHser);
 }
 
 void loop()
 {
 
-  static uint32_t next_delay = READ_DELAY;
-  bool read_just_completed = false;
   do_background_tasks();
 
-  kwh_loop();
-  kwhStatus status = status_;
-
-  if (status == kwhStatus::Ready)
-  {
-    Serial.println(F("READ STATUS::READY"));
-    kwh_start_reading();
-  }
-  else if (status == kwhStatus::Ok)
-  {
-    read_just_completed = true; /* Read completed successfully */
-    next_delay = READ_DELAY;    /* Reset delay to default */
-    // char topic[sizeof(MQTT_OBIS_PREFIX) + MAX_OBIS_CODE_LENGTH];
-    // strcpy(topic, MQTT_OBIS_PREFIX);
-
-    // char *obis_start = &topic[sizeof(MQTT_OBIS_PREFIX) - 1];
-    // for (auto const &entry : reader.values())
-    // {
-    //   strlcpy(obis_start, entry.first.c_str(), MAX_OBIS_CODE_LENGTH + 1);
-    //   mqtt.publish(topic, entry.second.c_str(), true);
-    // }
-    Serial.println(F("READ STATUS::OK"));
-    Serial.println(F("SEND TO MQTT"));
-
-    kwh_ready();
-  }
-  else if (status != kwhStatus::Busy) /* Not Ready, Ok or Busy => error */
-  {
-    read_just_completed = true; /* Read completed with error */
-    next_delay *= 2;
-    if (next_delay > 60 * 1000)
-    {
-      next_delay = 60 * 1000;
-    }
-    Serial.println(F("READ STATUS::BUSY"));
-
-    kwh_ready();
-  }
-
-  /* If we didn't just complete a read, skip logging and LED blinking */
-  if (!read_just_completed)
-    return;
-
-  size_t successes = successes_;
-  size_t errors = errors_;
-  size_t checksum_errors = checksum_errors_;
-
-  digitalWrite(LED_BUILTIN, HIGH);
-
-  delay_handle_background(100);
-  if (status == kwhStatus::Ok)
-    digitalWrite(LED_BUILTIN, LOW);
-
-  if (next_delay >= 100)
-    delay_handle_background(next_delay - 100);
-  digitalWrite(LED_BUILTIN, LOW);
-
-  // getDataKWH();
+  // edmiread.step_trigger();
+  // Serial.printf("%9s\n", EdmiCMDReaderStatus().c_str());
+  // delay(200);
+  // if (kwhSerialNumber.length() == 0)
+  //   kwhSerialNumber = edmiread.edmi_R_serialnumber();
+  // Serial.println(kwhSerialNumber);
+  // delay(200);
 
 } // loop
