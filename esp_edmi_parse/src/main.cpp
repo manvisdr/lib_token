@@ -1,6 +1,23 @@
 #include <Arduino.h>
 #include <SafeString.h>
 #include <EDMICmdLine.h>
+#include <NTPClient.h>
+#include <PubSubClient.h>
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <ESPmDNS.h>
+#include <WiFiUdp.h>
+#include <ArduinoOTA.h>
+
+const char *ssid = "MGI-MNC";
+const char *password = "#neurixmnc#";
+const char *mqtt_server = "203.194.112.238";
+
+WiFiClient espClient;
+PubSubClient client(espClient);
+WiFiUDP ntpUDP;
+const long utcOffsetInSeconds = 25200; // GMT INDONESIA FOR NTP
+NTPClient timeClient(ntpUDP, "id.pool.ntp.org", utcOffsetInSeconds);
 
 #define RXD2 16 // PIN RX2
 #define TXD2 17 // PIN TX2
@@ -290,36 +307,6 @@ void textFromHexString(char *hex, char *result)
   *result = '\0';
 }
 
-float ConvertB32ToFloat(uint32_t b32)
-{
-  float result;
-  int32_t shift;
-  uint16_t bias;
-
-  if (b32 == 0)
-    return 0.0;
-  // pull significand
-  result = (b32 & 0x7fffff); // mask significand
-  result /= (0x800000);      // convert back to float
-  result += 1.0f;            // add one back
-  // deal with the exponent
-  bias = 0x7f;
-  shift = ((b32 >> 23) & 0xff) - bias;
-  while (shift > 0)
-  {
-    result *= 2.0;
-    shift--;
-  }
-  while (shift < 0)
-  {
-    result /= 2.0;
-    shift++;
-  }
-  // sign
-  result *= (b32 >> 31) & 1 ? -1.0 : 1.0;
-  return result;
-}
-
 void hexStringtoASCII(char *hex, char *result)
 {
   char text[25] = {0}; // another 25
@@ -355,479 +342,20 @@ float convert(byte *data)
   return converter.value;
 }
 
-enum class kwhStatus : uint8_t
+void blink(int times)
 {
-  Ready,
-  Busy,
-  Ok,
-  Timeout,
-  Notlogin,
-  ProtocolError,
-  ChecksumError,
-};
-
-enum class kwhStep : uint8_t
-{
-  Ready,
-  Started,
-  SendConnect,
-  Connected,
-  SendLogin,
-  LoginACK,
-  SendRegister,
-  ReadRegister,
-  AfterData,
-  SendLogout,
-  LogoutACK,
-};
-
-enum class kwhRegisterStep : uint8_t
-{
-  SerialNumber,
-  KWHA,
-  KWHB,
-  KWHTOTAL,
-};
-
-size_t errors_ = 0, checksum_errors_ = 0, successes_ = 0;
-kwhStatus status_;
-kwhStep step_;
-kwhRegisterStep regStep_;
-
-void kwh_ready()
-{
-  if (status_ != kwhStatus::Busy)
-    status_ = kwhStatus::Ready;
-}
-
-void kwh_start_reading()
-{
-  /* Don't allow starting a read when one is already in progress */
-  if (status_ == kwhStatus::Busy)
-    return;
-
-  status_ = kwhStatus::Busy;
-  step_ = kwhStep::Started;
-  regStep_ = kwhRegisterStep::KWHA;
-}
-
-void kwh_change_status(kwhStatus to)
-{
-  if (to == kwhStatus::ProtocolError)
-    ++errors_;
-  else if (to == kwhStatus::ChecksumError)
-    ++checksum_errors_;
-  else if (to == kwhStatus::Ok)
-    ++successes_;
-
-  status_ = to;
-}
-
-void kwh_SendConnect()
-{
-  cmd_trigMeter();
-  Serial2.flush();
-  delay(100);
-  Serial.println(F("kwh_SendConnect()"));
-  step_ = kwhStep::Connected;
-}
-
-void kwh_sendLogin()
-{
-  Serial.println(F("kwh_sendLogin()"));
-  cmd_logonMeter();
-  Serial2.flush();
-  delay(100);
-  Serial.println(F("SEND LOGIN"));
-  step_ = kwhStep::LoginACK;
-}
-
-void kwh_readACK()
-{
-  Serial.print(F("kwh_readACK() -> "));
-  char charACK[MAX_ACK_CHAR];
-  char flushRX;
-  if (Serial2.available() > 0)
+  for (int x = 0; x <= times; x++)
   {
-    flushRX = Serial2.read();
-  }
-  size_t len = Serial2.readBytesUntil(ETX, charACK, MAX_ACK_CHAR);
-
-  if (charACK[0] == ACK)
-  {
-    if (step_ == kwhStep::Connected)
-    {
-      Serial.println(F("ACK RECEIVED - kwhStep::Connected"));
-      step_ = kwhStep::SendLogin;
-    }
-    else if (step_ == kwhStep::LoginACK)
-    {
-      Serial.println(F("ACK RECEIVED - kwhStep::LoginACK"));
-      step_ = kwhStep::SendRegister;
-    }
-    else if (step_ == kwhStep::AfterData)
-    {
-      Serial.println(F("ACK RECEIVED - kwhStep::AfterData"));
-      step_ = kwhStep::LogoutACK;
-    }
+    digitalWrite(LED_BUILTIN, LOW);
+    delay(50);
+    digitalWrite(LED_BUILTIN, HIGH);
+    delay(50);
   }
 }
 
-void kwh_parseData()
-{
-  Serial.println(F("kwh_parseData()"));
-  char charData[MAX_RX_CHARS];
-  char buffData[KWH_CHAR];
-  createSafeString(outParse, 8);
-  char flushRX;
-
-  char s[16];
-  uint32_t value;
-  // uint32_t nevlaue;
-  // long x;
-  // float y;
-  // uint32_t *const py = (uint32_t *)&y;
-
-  size_t len = Serial2.readBytesUntil(ETX, charData, MAX_RX_CHARS);
-
-  Serial.print(F("LEN - "));
-  Serial.println(len);
-  Serial.println(charData);
-
-  switch (regStep_)
-  {
-
-  case kwhRegisterStep::KWHA:
-    Serial.println(F("     DATA KWH_A "));
-    for (size_t i = 0; i < KWH_CHAR; i++)
-    {
-      buffData[i] = charData[i + 4];
-      outParse += "0123456789ABCDEF"[buffData[i] / 16];
-      outParse += "0123456789ABCDEF"[buffData[i] % 16];
-      Serial.print(F("     DATA ke "));
-      Serial.print(i);
-      Serial.print(F(" > "));
-      Serial.print(charData[i + 4], HEX);
-      Serial.print(F(" | BUFFDATA ="));
-      Serial.println(buffData[i], HEX);
-    }
-    Serial.print(F("     "));
-    Serial.println(buffData);
-    // Serial.print(convert((byte)buffData)); using union
-    // outKWHA = convert((byte)buffData);
-
-    Serial.println(outParse);
-    value = strtoul(outParse.c_str(), NULL, 16);
-    // dtostrf(convert((byte)buffData), 1, 0, outKWHA);
-    Serial.println(outKWHA);
-    outParse.clear();
-
-    break;
-
-  case kwhRegisterStep::KWHB:
-    Serial.println(F("     DATA KWH_B "));
-    for (size_t i = 0; i < KWH_CHAR; i++)
-    {
-      buffData[i] = charData[i + 5];
-      outParse += "0123456789ABCDEF"[buffData[i] / 16];
-      outParse += "0123456789ABCDEF"[buffData[i] % 16];
-      Serial.print(F("     DATA ke "));
-      Serial.print(i);
-      Serial.print(F(" > "));
-      Serial.print(charData[i + 5], HEX);
-      Serial.print(F(" | BUFFDATA ="));
-      Serial.println(buffData[i], HEX);
-    }
-    Serial.print(F("     "));
-    Serial.println(buffData);
-
-    Serial.println(outParse);
-    value = strtoul(outParse.c_str(), NULL, 16);
-    // dtostrf(convert((byte)buffData), 1, 0, outKWHB);
-    Serial.println(outKWHB);
-    outParse.clear();
-
-    break;
-
-  case kwhRegisterStep::KWHTOTAL:
-    Serial.println(F("     DATA KWH_T "));
-    for (size_t i = 0; i < KWH_CHAR; i++)
-    {
-      buffData[i] = charData[i + 4];
-      outParse += "0123456789ABCDEF"[buffData[i] / 16];
-      outParse += "0123456789ABCDEF"[buffData[i] % 16];
-      Serial.print(F("     DATA ke "));
-      Serial.print(i);
-      Serial.print(F(" > "));
-      Serial.print(charData[i + 4], HEX);
-      Serial.print(F(" | BUFFDATA ="));
-      Serial.println(buffData[i], HEX);
-    }
-    Serial.print(F("     "));
-    Serial.println(buffData);
-
-    Serial.println(outParse);
-    value = strtoul(outParse.c_str(), NULL, 16);
-    // dtostrf(convert((byte)buffData), 1, 0, outKWHTOT);
-    Serial.println(outKWHTOT);
-    outParse.clear();
-
-    break;
-  }
-  memset(charData, 0x00, MAX_RX_CHARS); // array is reset to 0s.
-}
-
-void kwh_readRegister()
-{
-  switch (regStep_)
-  {
-  case kwhRegisterStep::KWHA:
-    Serial.println(F("READ KWHA"));
-    kwh_parseData();
-    step_ = kwhStep::SendRegister;
-    regStep_ = kwhRegisterStep::KWHB;
-    break;
-  case kwhRegisterStep::KWHB:
-    Serial.println(F("READ KWHB"));
-    kwh_parseData();
-    step_ = kwhStep::SendRegister;
-    regStep_ = kwhRegisterStep::KWHTOTAL;
-    break;
-  case kwhRegisterStep::KWHTOTAL:
-    Serial.println(F("READ KWHTOTAL"));
-    kwh_parseData();
-    step_ = kwhStep::AfterData;
-    break;
-  }
-}
-
-void kwh_sendRegister()
-{
-  switch (regStep_)
-  {
-  case kwhRegisterStep::KWHA:
-    Serial.println(F("SEND REGISTER KWHA"));
-    cmd_readRegister(regKWHA);
-    Serial2.flush();
-    delay(100);
-    step_ = kwhStep::ReadRegister;
-    break;
-  case kwhRegisterStep::KWHB:
-    Serial.println(F("SEND REGISTER KWHB"));
-    cmd_readRegister(regKWHB);
-    Serial2.flush();
-    delay(100);
-    step_ = kwhStep::ReadRegister;
-    break;
-  case kwhRegisterStep::KWHTOTAL:
-    Serial.println(F("SEND REGISTER KWH TOTAL"));
-    cmd_readRegister(regKWHTOT);
-    Serial2.flush();
-    delay(100);
-    step_ = kwhStep::ReadRegister;
-    break;
-  }
-}
-
-void kwh_sendLogout()
-{
-  Serial.println(F("SEND LOGOUT"));
-  cmd_logoffMeter();
-  kwh_readACK();
-}
-
-void kwh_lastStep()
-{
-  Serial.println(F("KWH LOGOUT -> ACK"));
-  return kwh_change_status(kwhStatus::Ok);
-}
-
-void kwh_loop()
-{
-  if (status_ != kwhStatus::Busy)
-    return;
-
-  switch (step_)
-  {
-  case kwhStep::Ready: /* nothing to do, this should never happen */
-    break;
-  case kwhStep::Started:
-    kwh_SendConnect();
-    break;
-  case kwhStep::Connected:
-    kwh_readACK();
-    break;
-  case kwhStep::SendLogin:
-    kwh_sendLogin();
-    break;
-  case kwhStep::LoginACK:
-    kwh_readACK();
-    break;
-  case kwhStep::SendRegister:
-    kwh_sendRegister();
-    break;
-  case kwhStep::ReadRegister:
-    kwh_readRegister();
-    break;
-  case kwhStep::AfterData:
-    kwh_sendLogout();
-  case kwhStep::LogoutACK:
-    kwh_lastStep();
-    break;
-  }
-}
-
-bool kwh_getSerialNumber()
-{
-  bool getSerialSuccess = false;
-  Serial.print(F("kwh_getSerialNumber() -> "));
-  cmd_logonMeter();
-  char charACK[MAX_ACK_CHAR];
-  char charData[MAX_RX_CHARS];
-  char flushRX;
-  if (Serial2.available() > 0)
-  {
-    flushRX = Serial2.read();
-  }
-  size_t len = Serial2.readBytesUntil(ETX, charACK, MAX_ACK_CHAR);
-  Serial.println(len);
-  Serial.println(charACK[0]);
-  if (charACK[1] == CAN)
-  {
-    Serial.println(F("CAN CANCEL."));
-    getSerialSuccess = false;
-  }
-  else if (charACK[1] == ACK)
-  {
-    Serial.println(F("ACK RECEIVED"));
-    Serial.println(F("      READ  - SERIAL NUMBER."));
-    cmd_readRegister(regSerNum);
-    if (Serial2.available() > 0)
-    {
-      flushRX = Serial2.read();
-    }
-    size_t lens = Serial2.readBytesUntil(ETX, charData, MAX_RX_CHARS);
-    Serial.println(lens);
-    Serial.println(charData[1]);
-    if (charData[1] == CHAR_REGREAD)
-    {
-      Serial.println(F("     DATA SERIAL NUMBER"));
-      for (size_t i = 0; i < sizeof(outSerialNumber); i++)
-      {
-        outSerialNumber[i] = charData[i + 5];
-        Serial.print(F("     DATA ke "));
-        Serial.print(i);
-        Serial.print(F(" > "));
-        Serial.println(outSerialNumber[i], HEX);
-      }
-      Serial.print(F("     "));
-      Serial.println(outSerialNumber);
-      getSerialSuccess = true;
-    }
-    else
-      getSerialSuccess = false;
-  }
-  return getSerialSuccess;
-}
-const unsigned int interval = 5000;
 const unsigned int interval_cek_konek = 2000;
-const unsigned int interval_record = 10000;
-long previousMillis = 0;
+const unsigned int interval_record = 5000;
 long previousMillis1 = 0;
-void do_background_tasks()
-{
-  // if (!mqtt.loop()) /* PubSubClient::loop() returns false if not connected */
-  // {
-  //   mqtt_connect();
-  // }
-  EdmiCMDReader::Status status = edmiread.status();
-  edmiread.step_trigger();
-  if (millis() - previousMillis > interval_record and status == EdmiCMDReader::Status::Connect)
-  {
-    edmiread.read_default();
-    previousMillis = millis();
-  }
-}
-
-void delay_handle_background(long time)
-{
-  long const increment = 5;
-  while ((time -= increment) > 0)
-  {
-    // do_background_tasks();
-    delay(increment);
-  }
-}
-
-boolean readChar(unsigned int timeout, byte *inChar)
-{
-  unsigned long currentMillis = millis();
-  unsigned long previousMillis = currentMillis;
-
-  while (currentMillis - previousMillis < timeout)
-  {
-    if (Serial2.available())
-    {
-      (*inChar) = (byte)Serial2.read();
-      return true;
-    }
-    currentMillis = millis();
-  } // while
-  return false;
-}
-
-boolean readMessage(char *message, int maxMessageSize, unsigned int timeout)
-{
-  byte inChar;
-  int index = 0;
-  boolean completeMsg = false;
-  byte checksum = 0;
-  bool dlechar = false;
-
-  unsigned long currentMillis = millis();
-  unsigned long previousMillis = currentMillis;
-
-  while (currentMillis - previousMillis < timeout)
-  {
-    if (Serial2.available())
-    {
-      inChar = (byte)Serial2.read();
-
-      if (inChar == STX) // start of message?
-      {
-        while (readChar(INTERCHAR_TIMEOUT, &inChar))
-        {
-          if (inChar != ETX)
-          {
-            if (inChar == DLE)
-              dlechar = true;
-            else
-            {
-              if (dlechar)
-                inChar &= 0xBF;
-              dlechar = false;
-              message[index] = inChar;
-              index++;
-              if (index == maxMessageSize) // buffer full
-                break;
-            }
-            // checksum = checksum + inChar;
-          }
-          else // got ETX, next character is the checksum
-          {
-            message[index] = '\0'; // good checksum, null terminate message
-            completeMsg = true;
-
-          } // next character is the checksum
-        }   // while read until ETX or timeout
-      }     // inChar == STX
-    }       // Serial2.available()
-    if (completeMsg)
-      break;
-    currentMillis = millis();
-  } // while
-  return completeMsg;
-}
 
 EdmiCMDReader edmiread(Serial2, RXD2, TXD2, "MK10E");
 const std::map<EdmiCMDReader::Status, std::string> METER_STATUS_MAP = {
@@ -850,6 +378,30 @@ std::string EdmiCMDReaderStatus()
     return "Unknw";
   return it->second;
 }
+EdmiCMDReader::Status status = edmiread.status();
+
+void do_background_tasks()
+{
+  ArduinoOTA.handle();
+  timeClient.update();
+  // if (!mqtt.loop()) /* PubSubClient::loop() returns false if not connected */
+  // {
+  //   mqtt_connect();
+  // }
+  edmiread.keepAlive();
+  Serial.printf("%9s\n", EdmiCMDReaderStatus().c_str());
+}
+
+void delay_handle_background()
+{
+  if (millis() - previousMillis > interval_record /*and status == EdmiCMDReader::Status::Connect*/)
+  {
+    Serial.printf("TIME TO READ");
+    edmiread.acknowledge();
+    edmiread.step_start();
+    previousMillis = millis();
+  }
+}
 
 char gg;
 bool getKWH = false;
@@ -862,16 +414,72 @@ void setup()
   Serial.begin(115200);
   edmiread.begin(9600);
   // Serial2.begin(9600, SERIAL_8N1, RXD2, TXD2);
-  pinMode(pinLED, OUTPUT);
+  pinMode(LED_BUILTIN, OUTPUT);
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid, password);
+  while (WiFi.waitForConnectResult() != WL_CONNECTED)
+  {
+    Serial.println("Connection Failed! Rebooting...");
+    delay(5000);
+    ESP.restart();
+  }
 
-  // getKWHser = kwh_getSerialNumber();
-  // Serial.println(getKWHser);
+  ArduinoOTA
+      .onStart([]()
+               {
+      String type;
+      if (ArduinoOTA.getCommand() == U_FLASH)
+        type = "sketch";
+      else // U_SPIFFS
+        type = "filesystem";
+
+      // NOTE: if updating SPIFFS this would be the place to unmount SPIFFS using SPIFFS.end()
+      Serial.println("Start updating " + type); })
+      .onEnd([]()
+             { Serial.println("\nEnd"); })
+      .onProgress([](unsigned int progress, unsigned int total)
+                  { Serial.printf("Progress: %u%%\r", (progress / (total / 100))); })
+      .onError([](ota_error_t error)
+               {
+      Serial.printf("Error[%u]: ", error);
+      if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
+      else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
+      else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
+      else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
+      else if (error == OTA_END_ERROR) Serial.println("End Failed"); });
+
+  ArduinoOTA.begin();
+  Serial.println("Ready");
+  Serial.print("IP address: ");
+  Serial.println(WiFi.localIP());
+  timeClient.begin();
+  timeClient.update();
+  timeClient.setUpdateInterval(5 * 60 * 1000); // update from NTP only every 5 minutes
 }
 
 void loop()
 {
 
   do_background_tasks();
+  edmiread.loop();
+
+  if (status == EdmiCMDReader::Status::Ready)
+  {
+    blink(1);
+  }
+  else if (status == EdmiCMDReader::Status::Finish)
+  {
+    blink(3);
+  }
+  else if (status != EdmiCMDReader::Status::Busy)
+  {
+    blink(5);
+  }
+
+  // digitalWrite(LED_BUILTIN, LOW);
+  delay_handle_background();
+  // if (status == EdmiCMDReader::Status::Finish)
+  //   digitalWrite(LED_BUILTIN, HIGH);
 
   // edmiread.step_trigger();
   // Serial.printf("%9s\n", EdmiCMDReaderStatus().c_str());

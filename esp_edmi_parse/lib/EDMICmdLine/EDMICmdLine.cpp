@@ -21,6 +21,9 @@
 // LOGIN - LEDMI,IMDEIMDE0
 const unsigned char register_login[15] = {0x4C, 0x45, 0x44, 0x4D, 0x49, 0x2C, 0x49, 0x4D, 0x44, 0x45, 0x49, 0x4D, 0x44, 0x45, 0x00};
 const unsigned char register_serialNum[] = {0xF0, 0x02};
+const unsigned char register_bP[] = {0x1E, 0x01};
+const unsigned char register_LbP[] = {0x1E, 0x02};
+const unsigned char register_Total[] = {0x1E, 0x00};
 const unsigned char register_logout[15] = {0x58};
 
 enum class EdmiCMDReader::ErrorCode : uint8_t
@@ -40,6 +43,7 @@ enum class EdmiCMDReader::ErrorCode : uint8_t
 enum class EdmiCMDReader::Step : uint8_t
 {
   Ready,
+  Started,
   Login,
   NotLogin,
   Read,
@@ -102,6 +106,47 @@ static unsigned short
 CalculateCharacterCRC16(unsigned short crc, unsigned char c)
 {
   return ((crc << 8) ^ ccitt_16[((crc >> 8) ^ c)]);
+}
+
+float ConvertB32ToFloat(uint32_t b32)
+{
+  float
+      result;
+  int32_t
+      shift;
+  uint16_t
+      bias;
+
+  if (b32 == 0)
+    return 0.0;
+  // pull significand
+  result = (b32 & 0x7fffff); // mask significand
+  result /= (0x800000);      // convert back to float
+  result += 1.0f;            // add one back
+  // deal with the exponent
+  bias = 0x7f;
+  shift = ((b32 >> 23) & 0xff) - bias;
+  while (shift > 0)
+  {
+    result *= 2.0;
+    shift--;
+  }
+  while (shift < 0)
+  {
+    result /= 2.0;
+    shift++;
+  }
+  // sign
+  result *= (b32 >> 31) & 1 ? -1.0 : 1.0;
+  return result;
+}
+
+uint32_t bytearrayto32byte(char *data)
+{
+  return ((uint32_t)data[0]) << 24 |
+         ((uint32_t)data[1]) << 16 |
+         ((uint32_t)data[2]) << 8 |
+         ((uint32_t)data[3]);
 }
 
 static uint16_t
@@ -283,7 +328,7 @@ uint8_t EdmiCMDReader::RX_message(char *message, int maxMessageSize, unsigned in
   return index - 3;
 }
 
-void EdmiCMDReader::step_trigger()
+void EdmiCMDReader::keepAlive()
 {
   if (status_ == Status::Busy)
     return;
@@ -298,16 +343,33 @@ void EdmiCMDReader::step_trigger()
     status_ = Status::Disconnect;
 }
 
+void EdmiCMDReader::step_start()
+{
+  if (status_ == Status::Busy)
+    return;
+
+  status_ = Status::Busy;
+  step_ = Step::Started;
+}
+
 void EdmiCMDReader::step_login()
 {
+  if (status_ != Status::Busy)
+    return;
   char
       charAck[CHAR_RX_ACK];
   TX_cmd((unsigned char *)register_login, sizeof(register_login));
   RX_message(charAck, CHAR_RX_ACK, RX_TIMEOUT);
   if (charAck[0] == ACK)
-    status_ = Status::LoggedIn;
-  else
-    status_ = Status::NotLogin;
+  {
+    if (step_ == Step::Started)
+      step_ = Step::Read;
+    else
+      status_ = Status::LoggedIn;
+  }
+  //
+  // else
+  //   status_ = Status::NotLogin;
 }
 
 void EdmiCMDReader::step_logout()
@@ -317,7 +379,10 @@ void EdmiCMDReader::step_logout()
   TX_cmd((unsigned char *)register_logout, sizeof(register_logout));
   RX_message(charAck, CHAR_RX_ACK, RX_TIMEOUT);
   if (charAck[0] == ACK)
-    step_ = Step::NotLogin;
+  {
+    step_ = Step::Finished;
+    status_ = Status::Finish;
+  }
 }
 
 String EdmiCMDReader::edmi_R_serialnumber(/*char *output, int len*/)
@@ -356,14 +421,23 @@ String EdmiCMDReader::edmi_R_serialnumber(/*char *output, int len*/)
   return output;
 }
 
-void EdmiCMDReader::stepping()
+void EdmiCMDReader::loop()
 {
   if (status_ != Status::Busy or status_ == Status::Disconnect)
     return;
+  Serial.println("EdmiCMDReader::loop()");
   switch (step_)
   {
   case Step::Ready:
-    Serial.println("STEP REARY");
+    break;
+  case Step::Started:
+    step_login();
+    break;
+  case Step::Read:
+    read_default();
+    break;
+  case Step::Logout:
+    step_logout();
     break;
 
   default:
@@ -373,7 +447,63 @@ void EdmiCMDReader::stepping()
 
 bool EdmiCMDReader::read_default()
 {
-  stepping();
+  char
+      charData[CHAR_RX_DATA];
+  char
+      charBuffer[CHAR_DATA_FLOAT];
+  size_t
+      len;
+  if (status_ == Status::Busy)
+  {
+    edmi_R_FUNC(register_bP);
+    len = RX_message(charData, CHAR_RX_DATA, RX_TIMEOUT);
+    Serial.println(charData);
+    if (charData[0] == CAN)
+    {
+      regError_ = (ErrorCode)charData[1];
+      // return;
+    }
+    else if (charData[0] == R_FUNC and charData[1] == register_bP[0] and charData[2] == register_bP[1])
+    {
+      for (size_t i = 0; i < len - 3; i++)
+      {
+        charBuffer[i] = charData[i + 3];
+      }
+    }
+    edmi_R_FUNC(register_LbP);
+    len = RX_message(charData, CHAR_RX_DATA, RX_TIMEOUT);
+    Serial.println(charData);
+    if (charData[0] == CAN)
+    {
+      regError_ = (ErrorCode)charData[1];
+      // return;
+    }
+    else if (charData[0] == R_FUNC and charData[1] == register_bP[0] and charData[2] == register_bP[1])
+    {
+      for (size_t i = 0; i < len - 3; i++)
+      {
+        charBuffer[i] = charData[i + 3];
+      }
+      Serial.println(ConvertB32ToFloat(bytearrayto32byte(charBuffer)));
+    }
+    edmi_R_FUNC(register_bP);
+    len = RX_message(charData, CHAR_RX_DATA, RX_TIMEOUT);
+    Serial.println(charData);
+    if (charData[0] == CAN)
+    {
+      regError_ = (ErrorCode)charData[1];
+      // return;
+    }
+    else if (charData[0] == R_FUNC and charData[1] == register_Total[0] and charData[2] == register_Total[1])
+    {
+      for (size_t i = 0; i < len - 3; i++)
+      {
+        charBuffer[i] = charData[i + 3];
+      }
+    }
+  }
+  step_ = Step::Logout;
+  return true;
 }
 
 String EdmiCMDReader::serialNumber()

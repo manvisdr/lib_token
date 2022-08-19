@@ -28,18 +28,6 @@ public:
         ChecksumError
     };
 
-    const std::map<EdmiCMDReader::Step, std::string> METER_STEP_MAP = {
-        {EdmiCMDReader::Status::Disconnect, "Disconnect"},
-        {EdmiCMDReader::Status::Connect, "Connect"},
-        {EdmiCMDReader::Status::Ready, "Ready"},
-        {EdmiCMDReader::Status::LoggedIn, "LoggedIn"},
-        {EdmiCMDReader::Status::NotLogin, "NotLogin"},
-        {EdmiCMDReader::Status::Busy, "Busy"},
-        {EdmiCMDReader::Status::Finish, "Finish"},
-        {EdmiCMDReader::Status::TimeoutError, "Err-Timeout"},
-        {EdmiCMDReader::Status::ProtocolError, "Err-Prot"},
-        {EdmiCMDReader::Status::ChecksumError, "Err-Chk"}};
-
     explicit EdmiCMDReader(HardwareSerial &serial, uint8_t rxpin, uint8_t txpin, const char *typeEdmi) : serial_(serial)
     {
         rx_ = rxpin;
@@ -52,16 +40,15 @@ public:
     EdmiCMDReader(EdmiCMDReader &&) = delete;
     void begin(unsigned long baud);
 
-    void step_trigger();
-
-    void step_login();
-    void step_logout();
+    void keepAlive();
+    void loop();
 
     void TX_raw(unsigned char d);
     void TX_cmd(unsigned char *cmd, unsigned short len);
 
     void edmi_R_FUNC(const byte *reg);
 
+    void step_start();
     bool read_default();
 
     String serialNumber();
@@ -73,6 +60,11 @@ public:
     String edmi_R_serialnumber(/*char *output, int len*/);
 
     Status status() const { return status_; }
+    void acknowledge()
+    {
+        if (status_ != Status::Busy)
+            status_ = Status::Ready;
+    }
 
 protected:
     enum class Step : uint8_t;
@@ -87,9 +79,11 @@ protected:
         float kwhTotal;
     } _currentValues; // Measured values
 
+    void step_login();
+    void step_logout();
     void TX_byte(unsigned char d);
     bool RX_char(unsigned int timeout, byte *inChar);
-    void stepping();
+
     uint8_t RX_message(char *message, int maxMessageSize, unsigned int timeout);
     Step step_;
     ErrorCode regError_;
