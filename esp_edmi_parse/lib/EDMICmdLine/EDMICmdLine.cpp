@@ -24,7 +24,7 @@ const unsigned char register_serialNum[] = {0xF0, 0x02};
 const unsigned char register_bP[] = {0x1E, 0x01};
 const unsigned char register_LbP[] = {0x1E, 0x02};
 const unsigned char register_Total[] = {0x1E, 0x00};
-const unsigned char register_logout[15] = {0x58};
+const unsigned char register_logout[] = {0x58};
 
 enum class EdmiCMDReader::ErrorCode : uint8_t
 {
@@ -46,11 +46,22 @@ enum class EdmiCMDReader::Step : uint8_t
   Started,
   Login,
   NotLogin,
+  Send,
   Read,
-  MultiRead,
   Logout,
   Finished
 };
+
+enum class EdmiCMDReader::Read : uint8_t
+{
+  SerialNumber,
+  Single,
+  Default,
+};
+
+void detectType()
+{
+}
 
 static short
 gencrc_16(short i)
@@ -233,6 +244,10 @@ void EdmiCMDReader::TX_cmd(unsigned char *cmd, unsigned short len)
   EdmiCMDReader::TX_raw(ETX);
 }
 
+// void EdmiCMDReader::set_Register(unsigned char *buf, uint16_t len);
+// {
+// }
+
 void EdmiCMDReader::edmi_R_FUNC(const byte *reg)
 {
   unsigned char registers[3] = {R_FUNC, reg[0], reg[1]};
@@ -338,9 +353,9 @@ void EdmiCMDReader::keepAlive()
   TX_raw(ETX);
   RX_message(charAck, CHAR_RX_ACK, RX_TIMEOUT);
   if (charAck[0] == ACK)
-    status_ = Status::Connect;
+    connStatus_ = connStatus::Connect;
   else
-    status_ = Status::Disconnect;
+    connStatus_ = connStatus::Disconnect;
 }
 
 void EdmiCMDReader::step_start()
@@ -363,13 +378,13 @@ void EdmiCMDReader::step_login()
   if (charAck[0] == ACK)
   {
     if (step_ == Step::Started)
-      step_ = Step::Read;
+      step_ = Step::Send;
     else
-      status_ = Status::LoggedIn;
+      status_ = Status::NotLogin;
   }
-  //
-  // else
-  //   status_ = Status::NotLogin;
+  else if (charAck[0] == CAN)
+  {
+  }
 }
 
 void EdmiCMDReader::step_logout()
@@ -385,7 +400,7 @@ void EdmiCMDReader::step_logout()
   }
 }
 
-String EdmiCMDReader::edmi_R_serialnumber(/*char *output, int len*/)
+String EdmiCMDReader::read_Serialnumber(/*char *output, int len*/)
 {
   bool
       getSerialSuccess = false;
@@ -423,9 +438,8 @@ String EdmiCMDReader::edmi_R_serialnumber(/*char *output, int len*/)
 
 void EdmiCMDReader::loop()
 {
-  if (status_ != Status::Busy or status_ == Status::Disconnect)
+  if (status_ != Status::Busy or connStatus_ == connStatus::Disconnect)
     return;
-  Serial.println("EdmiCMDReader::loop()");
   switch (step_)
   {
   case Step::Ready:
@@ -434,6 +448,7 @@ void EdmiCMDReader::loop()
     step_login();
     break;
   case Step::Read:
+    // step_read();
     read_default();
     break;
   case Step::Logout:
@@ -443,6 +458,10 @@ void EdmiCMDReader::loop()
   default:
     break;
   }
+}
+
+void EdmiCMDReader::step_read()
+{
 }
 
 bool EdmiCMDReader::read_default()
@@ -469,6 +488,7 @@ bool EdmiCMDReader::read_default()
       {
         charBuffer[i] = charData[i + 3];
       }
+      Serial.println(ConvertB32ToFloat(bytearrayto32byte(charBuffer)));
     }
     edmi_R_FUNC(register_LbP);
     len = RX_message(charData, CHAR_RX_DATA, RX_TIMEOUT);
@@ -478,7 +498,7 @@ bool EdmiCMDReader::read_default()
       regError_ = (ErrorCode)charData[1];
       // return;
     }
-    else if (charData[0] == R_FUNC and charData[1] == register_bP[0] and charData[2] == register_bP[1])
+    else if (charData[0] == R_FUNC and charData[1] == register_LbP[0] and charData[2] == register_LbP[1])
     {
       for (size_t i = 0; i < len - 3; i++)
       {
@@ -486,13 +506,12 @@ bool EdmiCMDReader::read_default()
       }
       Serial.println(ConvertB32ToFloat(bytearrayto32byte(charBuffer)));
     }
-    edmi_R_FUNC(register_bP);
+    edmi_R_FUNC(register_Total);
     len = RX_message(charData, CHAR_RX_DATA, RX_TIMEOUT);
     Serial.println(charData);
     if (charData[0] == CAN)
     {
       regError_ = (ErrorCode)charData[1];
-      // return;
     }
     else if (charData[0] == R_FUNC and charData[1] == register_Total[0] and charData[2] == register_Total[1])
     {
@@ -500,6 +519,7 @@ bool EdmiCMDReader::read_default()
       {
         charBuffer[i] = charData[i + 3];
       }
+      Serial.println(ConvertB32ToFloat(bytearrayto32byte(charBuffer)));
     }
   }
   step_ = Step::Logout;

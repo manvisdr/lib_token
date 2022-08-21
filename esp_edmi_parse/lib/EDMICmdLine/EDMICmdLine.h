@@ -5,7 +5,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
-#include <string_view>
 
 #include <HardwareSerial.h>
 
@@ -14,10 +13,14 @@ typedef uint8_t byte;
 class EdmiCMDReader
 {
 public:
-    enum class Status : uint8_t
+    enum class connStatus : uint8_t
     {
         Disconnect,
         Connect,
+    };
+
+    enum class Status : uint8_t
+    {
         Ready,
         LoggedIn,
         NotLogin,
@@ -27,6 +30,20 @@ public:
         ProtocolError,
         ChecksumError
     };
+
+    const std::map<connStatus, std::string> CONN_STATUS_MAP = {
+        {connStatus::Disconnect, "Disconnect"},
+        {connStatus::Connect, "Connect"}};
+
+    const std::map<Status, std::string> EDMI_STATUS_MAP = {
+        {Status::Ready, "Ready"},
+        {Status::LoggedIn, "LoggedIn"},
+        {Status::NotLogin, "NotLogin"},
+        {Status::Busy, "Busy"},
+        {Status::Finish, "Finish"},
+        {Status::TimeoutError, "Err-Timeout"},
+        {Status::ProtocolError, "Err-Prot"},
+        {Status::ChecksumError, "Err-Chk"}};
 
     explicit EdmiCMDReader(HardwareSerial &serial, uint8_t rxpin, uint8_t txpin, const char *typeEdmi) : serial_(serial)
     {
@@ -38,6 +55,7 @@ public:
     EdmiCMDReader(EdmiCMDReader const &) = delete;
 
     EdmiCMDReader(EdmiCMDReader &&) = delete;
+    void detectType();
     void begin(unsigned long baud);
 
     void keepAlive();
@@ -57,9 +75,30 @@ public:
     float kwhLWBP();
     float kwhTotal();
 
-    String edmi_R_serialnumber(/*char *output, int len*/);
+    String read_Serialnumber(/*char *output, int len*/);
+    // void setRegister(unsigned char *buf, uint16_t len);
 
     Status status() const { return status_; }
+    connStatus connstatus() const { return connStatus_; }
+
+    std::string printconnStatus()
+    {
+        connStatus_ = connstatus();
+        auto it = CONN_STATUS_MAP.find(connStatus_);
+        if (it == CONN_STATUS_MAP.end())
+            return "Unknw";
+        return it->second;
+    }
+
+    std::string printStatus()
+    {
+        status_ = status();
+        auto it = EDMI_STATUS_MAP.find(status_);
+        if (it == EDMI_STATUS_MAP.end())
+            return "Unknw";
+        return it->second;
+    }
+
     void acknowledge()
     {
         if (status_ != Status::Busy)
@@ -69,6 +108,7 @@ public:
 protected:
     enum class Step : uint8_t;
     enum class ErrorCode : uint8_t;
+    enum class Read : uint8_t;
 
     struct
     {
@@ -81,14 +121,17 @@ protected:
 
     void step_login();
     void step_logout();
+    void step_read();
     void TX_byte(unsigned char d);
     bool RX_char(unsigned int timeout, byte *inChar);
 
     uint8_t RX_message(char *message, int maxMessageSize, unsigned int timeout);
+
     Step step_;
     ErrorCode regError_;
     HardwareSerial &serial_;
     Status status_ = Status::Ready;
+    connStatus connStatus_ = connStatus::Disconnect;
     uint8_t rx_, tx_;
     const char *typeEdmi_;
 };
