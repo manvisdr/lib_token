@@ -9,8 +9,8 @@
 #include <WiFiUdp.h>
 #include <ArduinoOTA.h>
 
-const char *ssid = "MGI-MNC";
-const char *password = "#neurixmnc#";
+const char *ssid = "hack-pascal2";
+const char *password = "55556666";
 const char *mqtt_server = "203.194.112.238";
 
 WiFiClient espClient;
@@ -231,67 +231,6 @@ short get_char(void)
   }
 }
 
-bool get_cmd(unsigned short max_len)
-{
-  short c;
-  static unsigned char *cur_pos = 0;
-  static unsigned short crc;
-  static char DLE_last;
-  int cntreg = 0;
-  /*
-   * check is cur_pos has not been initialised yet.
-   */
-
-  /*
-   * Get characters from the serial port while they are avialable
-   */
-  while ((c = get_char()) != -1)
-  {
-    switch (c)
-    {
-    case STX:
-      Serial.println("STX");
-
-      crc = CalculateCharacterCRC16(0, c);
-      break;
-    case ETX:
-      Serial.println("ETX");
-      if ((crc == 0) && (cntreg > 2))
-      {
-        cntreg -= 2; /* remove crc characters */
-        return (true);
-      }
-      else if (cntreg == 0)
-        return (true);
-      break;
-    case DLE:
-      Serial.println("DLE");
-      DLE_last = true;
-      break;
-    default:
-      if (DLE_last)
-        c &= 0xBF;
-      DLE_last = false;
-      // if (*len >= max_len)
-      //   break;
-      crc = CalculateCharacterCRC16(crc, c);
-      rxBuffer[cntreg] = c;
-      Serial.print("POS - ");
-      Serial.print(cntreg);
-      Serial.print(" DATA - ");
-      Serial.println(c, HEX);
-      // Serial.print(" rxBUFFER - ");
-      // Serial.println(rxBuffer[cntreg], HEX);
-
-      // *(cur_pos)++ = c;
-      // (*len)++;
-      cntreg++;
-    }
-  }
-  cntreg = 0;
-  return (false);
-}
-
 void textFromHexString(char *hex, char *result)
 {
   char temp[3];
@@ -358,28 +297,30 @@ const unsigned int interval_record = 5000;
 long previousMillis1 = 0;
 
 EdmiCMDReader edmiread(Serial2, RXD2, TXD2, "MK10E");
-const std::map<EdmiCMDReader::Status, std::string> METER_STATUS_MAP = {
-    {EdmiCMDReader::Status::Disconnect, "Disconnect"},
-    {EdmiCMDReader::Status::Connect, "Connect"},
-    {EdmiCMDReader::Status::Ready, "Ready"},
-    {EdmiCMDReader::Status::LoggedIn, "LoggedIn"},
-    {EdmiCMDReader::Status::NotLogin, "NotLogin"},
-    {EdmiCMDReader::Status::Busy, "Busy"},
-    {EdmiCMDReader::Status::Finish, "Finish"},
-    {EdmiCMDReader::Status::TimeoutError, "Err-Timeout"},
-    {EdmiCMDReader::Status::ProtocolError, "Err-Prot"},
-    {EdmiCMDReader::Status::ChecksumError, "Err-Chk"}};
 
-std::string EdmiCMDReaderStatus()
-{
-  EdmiCMDReader::Status status = edmiread.status();
-  auto it = METER_STATUS_MAP.find(status);
-  if (it == METER_STATUS_MAP.end())
-    return "Unknw";
-  return it->second;
-}
+// const std::map<EdmiCMDReader::Status, std::string> METER_STATUS_MAP = {
+//     {EdmiCMDReader::Status::Disconnect, "Disconnect"},
+//     {EdmiCMDReader::Status::Connect, "Connect"},
+//     {EdmiCMDReader::Status::Ready, "Ready"},
+//     {EdmiCMDReader::Status::LoggedIn, "LoggedIn"},
+//     {EdmiCMDReader::Status::NotLogin, "NotLogin"},
+//     {EdmiCMDReader::Status::Busy, "Busy"},
+//     {EdmiCMDReader::Status::Finish, "Finish"},
+//     {EdmiCMDReader::Status::TimeoutError, "Err-Timeout"},
+//     {EdmiCMDReader::Status::ProtocolError, "Err-Prot"},
+//     {EdmiCMDReader::Status::ChecksumError, "Err-Chk"}};
+
+// std::string EdmiCMDReaderStatus()
+// {
+//   EdmiCMDReader::Status status = edmiread.status();
+//   auto it = METER_STATUS_MAP.find(status);
+//   if (it == METER_STATUS_MAP.end())
+//     return "Unknw";
+//   return it->second;
+// }
+
 EdmiCMDReader::Status status = edmiread.status();
-
+EdmiCMDReader::connStatus connstatus = edmiread.connstatus();
 void do_background_tasks()
 {
   ArduinoOTA.handle();
@@ -389,16 +330,20 @@ void do_background_tasks()
   //   mqtt_connect();
   // }
   edmiread.keepAlive();
-  Serial.printf("%9s\n", EdmiCMDReaderStatus().c_str());
+  Serial.println(timeClient.getFormattedTime());
 }
 
 void delay_handle_background()
 {
-  if (millis() - previousMillis > interval_record /*and status == EdmiCMDReader::Status::Connect*/)
+
+  // Serial.printf("%9s\n", edmiread.printStatus().c_str());
+  if (/*timeClient.getSeconds() == 0*/
+      millis() - previousMillis > interval_record)
   {
     Serial.printf("TIME TO READ");
     edmiread.acknowledge();
     edmiread.step_start();
+    // previousMillis = timeClient.get_millis();
     previousMillis = millis();
   }
 }
@@ -462,7 +407,6 @@ void loop()
 
   do_background_tasks();
   edmiread.loop();
-
   if (status == EdmiCMDReader::Status::Ready)
   {
     blink(1);
