@@ -9,12 +9,12 @@
 #include <WiFiUdp.h>
 #include <ArduinoOTA.h>
 
-const char *ssid = "MGI-MNC";
-const char *password = "#neurixmnc#";
+const char *ssid = "NEURIXII";
+const char *password = "#neurix123#";
 const char *mqtt_server = "203.194.112.238";
 
-WiFiClient espClient;
-PubSubClient client(espClient);
+WiFiClient espWifiClient;
+PubSubClient mqttClientWifi(espWifiClient);
 WiFiUDP ntpUDP;
 const long utcOffsetInSeconds = 25200; // GMT INDONESIA FOR NTP
 NTPClient timeClient(ntpUDP, "id.pool.ntp.org", utcOffsetInSeconds);
@@ -73,14 +73,6 @@ NTPClient timeClient(ntpUDP, "id.pool.ntp.org", utcOffsetInSeconds);
 // pins to be used may vary with your Arduino for software-serial...
 const byte pinLED = LED_BUILTIN; // visual indication of life
 
-unsigned char logonReg[15] = {0x4C, 0x45, 0x44, 0x4D, 0x49, 0x2C, 0x49, 0x4D, 0x44, 0x45, 0x49, 0x4D, 0x44, 0x45, 0x00};
-unsigned char logoffReg[1] = {0x58};
-
-byte regSerNum[2] = {0xF0, 0x02}; // REGISTER SERIAL NUMBER
-byte regKWHA[2] = {0x1E, 0x01};   // REGISTER KWH A
-byte regKWHB[2] = {0x1E, 0x02};   // REGISTER KWH B
-byte regKWHTOT[2] = {0x1E, 0x00}; // REGISTER KWH TOTAL
-
 uint32_t const READ_DELAY = 1000; /* ms */
 unsigned int interval = 5000;
 long previousMillis = 0;
@@ -102,244 +94,63 @@ char outKWHA[KWH_OUT_CHAR];
 char outKWHB[KWH_OUT_CHAR];
 char outKWHTOT[KWH_OUT_CHAR];
 
-void ReceiveStateMachine(void);
-bool GetSerialChar(char *pDest, unsigned long *pTimer);
-bool CheckTimeout(unsigned long *timeNow, unsigned long *timeStart);
+const unsigned int interval_cek_konek = 2000;
+const unsigned int interval_record = 15000;
+long previousMillis1 = 0;
 
-uint32_t convertTo32(uint8_t *id)
-{
-  uint32_t bigvar = (id[0] << 24) + (id[1] << 16) + (id[2] << 8) + (id[3]);
-  return bigvar;
-}
+bool getKWH = false;
+bool getKWHser = false;
+bool kwhReadReady = false;
+int count = 0;
+String kwhSerialNumber;
+const String customerID = "69696969";
 
-short gencrc_16(short i)
+IPAddress IPmqtt(203, 194, 112, 238);
+String userKey = "das";
+String apiKey = "mgi2022";
+const String channelId = "monKWH/AMR";
+float kwh1;
+
+EdmiCMDReader edmiread(Serial2, RXD2, TXD2);
+
+bool mqttConnectWifi()
 {
-  short j;
-  short k;
-  short crc;
-  k = i << 8;
-  crc = 0;
-  for (j = 0; j < 8; j++)
+  static const char alphanum[] = "0123456789"
+                                 "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                                 "abcdefghijklmnopqrstuvwxyz"; // For random generation of client ID.
+  char clientId[9];
+
+  uint8_t retry = 3;
+  while (!mqttClientWifi.connected())
   {
-    if ((crc ^ k) & 0x8000)
-      crc = (crc << 1) ^ 0x1021;
+    mqttClientWifi.setServer(IPmqtt, 1883);
+    // Serial.println(String("Attempting MQTT broker:") + serverName);
+
+    for (uint8_t i = 0; i < 8; i++)
+    {
+      clientId[i] = alphanum[random(62)];
+    }
+    clientId[8] = '\0';
+    // Setting mqtt gaes
+    if (mqttClientWifi.connect(clientId, userKey.c_str(), apiKey.c_str()))
+    {
+      // Serial.println("Established:" + String(clientId));
+      return true;
+    }
     else
-      crc <<= 1;
-    k <<= 1;
-  }
-  return (crc);
-}
-
-unsigned short
-CalculateCharacterCRC16(unsigned short crc, unsigned char c)
-{
-  return ((crc << 8) ^ gencrc_16((crc >> 8) ^ c));
-}
-
-// SEND TO KWH
-void cmdlink_putch(unsigned char ch)
-{
-  Serial2.write(ch);
-  Serial2.flush();
-}
-
-void send_byte(unsigned char d)
-{
-  switch (d)
-  {
-  case STX:
-  case ETX:
-  case DLE:
-  case XON:
-  case XOFF:
-    cmdlink_putch(DLE);
-    cmdlink_putch(d | 0x40);
-    break;
-  default:
-    cmdlink_putch(d);
-  }
-}
-
-void send_cmd(unsigned char *cmd, unsigned short len)
-{
-  unsigned short i;
-  unsigned short crc;
-  /*
-     Add the STX and start the CRC calc.
-  */
-  cmdlink_putch(STX);
-  crc = CalculateCharacterCRC16(0, STX);
-  /*
-     Send the data, computing CRC as we go.
-  */
-  for (i = 0; i < len; i++)
-  {
-    send_byte(*cmd);
-    crc = CalculateCharacterCRC16(crc, *cmd++);
-  }
-  /*
-     Add the CRC
-  */
-  send_byte((unsigned char)(crc >> 8));
-  send_byte((unsigned char)crc);
-  /*
-     Add the ETX
-  */
-  cmdlink_putch(ETX);
-}
-
-bool cmd_trigMeter()
-{
-  cmdlink_putch(STX);
-  cmdlink_putch(ETX);
-  return true;
-}
-
-bool cmd_logonMeter()
-{
-  send_cmd(logonReg, sizeof(logonReg));
-  return true;
-}
-
-bool cmd_logoffMeter()
-{
-  send_cmd(logoffReg, sizeof(logoffReg));
-  return true;
-}
-
-void cmd_readRegister(const byte *reg)
-{
-  unsigned char readReg[3] = {0x52, reg[0], reg[1]};
-  send_cmd(readReg, sizeof(readReg));
-  Serial2.flush();
-}
-
-short get_char(void)
-{
-  short rx;
-  if (Serial2.available())
-  {
-    // Serial.println("get_char");
-    rx = Serial2.read();
-    delay(100);
-    return rx;
-  }
-  else
-  {
-    Serial.println("no get_char");
-    return (-1);
-  }
-}
-
-bool get_cmd(unsigned short max_len)
-{
-  short c;
-  static unsigned char *cur_pos = 0;
-  static unsigned short crc;
-  static char DLE_last;
-  int cntreg = 0;
-  /*
-   * check is cur_pos has not been initialised yet.
-   */
-
-  /*
-   * Get characters from the serial port while they are avialable
-   */
-  while ((c = get_char()) != -1)
-  {
-    switch (c)
     {
-    case STX:
-      Serial.println("STX");
-
-      crc = CalculateCharacterCRC16(0, c);
-      break;
-    case ETX:
-      Serial.println("ETX");
-      if ((crc == 0) && (cntreg > 2))
-      {
-        cntreg -= 2; /* remove crc characters */
-        return (true);
-      }
-      else if (cntreg == 0)
-        return (true);
-      break;
-    case DLE:
-      Serial.println("DLE");
-      DLE_last = true;
-      break;
-    default:
-      if (DLE_last)
-        c &= 0xBF;
-      DLE_last = false;
-      // if (*len >= max_len)
-      //   break;
-      crc = CalculateCharacterCRC16(crc, c);
-      rxBuffer[cntreg] = c;
-      Serial.print("POS - ");
-      Serial.print(cntreg);
-      Serial.print(" DATA - ");
-      Serial.println(c, HEX);
-      // Serial.print(" rxBUFFER - ");
-      // Serial.println(rxBuffer[cntreg], HEX);
-
-      // *(cur_pos)++ = c;
-      // (*len)++;
-      cntreg++;
+      if (!--retry)
+        break;
+      // delay(3000);
     }
   }
-  cntreg = 0;
-  return (false);
+  return false;
 }
 
-void textFromHexString(char *hex, char *result)
+void mqttPublish(String msg)
 {
-  char temp[3];
-  int index = 0;
-  temp[2] = '\0';
-  while (hex[index])
-  {
-    strncpy(temp, &hex[index], 2);
-    *result = (char)strtol(temp, NULL, 16); // If representations are hex
-    result++;
-    index += 2;
-  }
-  *result = '\0';
-}
-
-void hexStringtoASCII(char *hex, char *result)
-{
-  char text[25] = {0}; // another 25
-  int tc = 0;
-
-  for (int k = 0; k < strlen(hex); k++)
-  {
-    if (k % 2 != 0)
-    {
-      char temp[3];
-      sprintf(temp, "%c%c", hex[k - 1], hex[k]);
-      int number = (int)strtol(temp, NULL, 16);
-      text[tc] = char(number);
-      tc++;
-    }
-  }
-  strcpy(result, text);
-}
-
-typedef union
-{
-  byte array[4];
-  float value;
-} ByteToFloat;
-
-float convert(byte *data)
-{
-  ByteToFloat converter;
-  for (byte i = 0; i < 4; i++)
-  {
-    converter.array[3 - i] = data[i]; // or converter.array[i] = data[i]; depending on endianness
-  }
-  return converter.value;
+  String path = channelId + customerID;
+  mqttClientWifi.publish(path.c_str(), msg.c_str());
 }
 
 void blink(int times)
@@ -352,62 +163,33 @@ void blink(int times)
     delay(50);
   }
 }
-
-const unsigned int interval_cek_konek = 2000;
-const unsigned int interval_record = 5000;
-long previousMillis1 = 0;
-
-EdmiCMDReader edmiread(Serial2, RXD2, TXD2, "MK10E");
-const std::map<EdmiCMDReader::Status, std::string> METER_STATUS_MAP = {
-    {EdmiCMDReader::Status::Disconnect, "Disconnect"},
-    {EdmiCMDReader::Status::Connect, "Connect"},
-    {EdmiCMDReader::Status::Ready, "Ready"},
-    {EdmiCMDReader::Status::LoggedIn, "LoggedIn"},
-    {EdmiCMDReader::Status::NotLogin, "NotLogin"},
-    {EdmiCMDReader::Status::Busy, "Busy"},
-    {EdmiCMDReader::Status::Finish, "Finish"},
-    {EdmiCMDReader::Status::TimeoutError, "Err-Timeout"},
-    {EdmiCMDReader::Status::ProtocolError, "Err-Prot"},
-    {EdmiCMDReader::Status::ChecksumError, "Err-Chk"}};
-
-std::string EdmiCMDReaderStatus()
-{
-  EdmiCMDReader::Status status = edmiread.status();
-  auto it = METER_STATUS_MAP.find(status);
-  if (it == METER_STATUS_MAP.end())
-    return "Unknw";
-  return it->second;
-}
-EdmiCMDReader::Status status = edmiread.status();
-
 void do_background_tasks()
 {
   ArduinoOTA.handle();
   timeClient.update();
-  // if (!mqtt.loop()) /* PubSubClient::loop() returns false if not connected */
-  // {
-  //   mqtt_connect();
-  // }
+  if (!mqttClientWifi.loop()) /* PubSubClient::loop() returns false if not connected */
+  {
+    mqttConnectWifi();
+  }
   edmiread.keepAlive();
-  Serial.printf("%9s\n", EdmiCMDReaderStatus().c_str());
+  // Serial.println(timeClient.getFormattedTime());
 }
 
 void delay_handle_background()
 {
-  if (millis() - previousMillis > interval_record /*and status == EdmiCMDReader::Status::Connect*/)
+  // Serial.printf("%9s\n", edmiread.printStatus().c_str());
+
+  if (timeClient.getSeconds() == 0)
+  // )millis() - previousMillis > interval_record /* and status == EdmiCMDReader::Status::Connect */)
   {
-    Serial.printf("TIME TO READ");
+    // mqttPublish("*" + customerID + "*" + 385868897 + "*" + 45600 + "*" + 55000 + "*" + 666000 + "#");
+    kwhReadReady = true;
     edmiread.acknowledge();
-    edmiread.step_start();
+    Serial.printf("TIME TO READ\n");
+
     previousMillis = millis();
   }
 }
-
-char gg;
-bool getKWH = false;
-bool getKWHser = false;
-int count = 0;
-String kwhSerialNumber;
 
 void setup()
 {
@@ -455,38 +237,52 @@ void setup()
   timeClient.begin();
   timeClient.update();
   timeClient.setUpdateInterval(5 * 60 * 1000); // update from NTP only every 5 minutes
+  kwhSerialNumber = edmiread.serialNumber();
+  Serial.printf("Serial Number - %s\n", kwhSerialNumber);
 }
 
 void loop()
 {
 
   do_background_tasks();
-  edmiread.loop();
-
-  if (status == EdmiCMDReader::Status::Ready)
+  edmiread.read_looping();
+  EdmiCMDReader::Status status = edmiread.status();
+  Serial.printf("%s\n", kwhReadReady ? "true" : "false");
+  if (status == EdmiCMDReader::Status::Ready and kwhReadReady)
   {
-    blink(1);
+    blink(3);
+    Serial.println("STEP_START");
+    edmiread.step_start();
   }
   else if (status == EdmiCMDReader::Status::Finish)
   {
-    blink(3);
+    Serial.printf("%.4f\n", edmiread.voltR());
+    Serial.printf("%.4f\n", edmiread.voltS());
+    Serial.printf("%.4f\n", edmiread.voltT());
+    Serial.printf("%.4f\n", edmiread.currentR());
+    Serial.printf("%.4f\n", edmiread.currentS());
+    Serial.printf("%.4f\n", edmiread.currentT());
+    Serial.printf("%.4f\n", edmiread.wattR());
+    Serial.printf("%.4f\n", edmiread.wattS());
+    Serial.printf("%.4f\n", edmiread.wattT());
+    Serial.printf("%.4f\n", edmiread.pf());
+    Serial.printf("%.4f\n", edmiread.frequency());
+    Serial.printf("%.4f\n", edmiread.kVarh());
+    Serial.printf("%.4f\n", edmiread.kwhLWBP());
+    Serial.printf("%.4f\n", edmiread.kwhWBP());
+    Serial.printf("%.4f\n", edmiread.kwhTotal());
+    Serial.println("FINISH");
+    blink(5);
+
+    kwhReadReady = false;
   }
   else if (status != EdmiCMDReader::Status::Busy)
   {
-    blink(5);
+    Serial.println("BUSY");
+    blink(1);
   }
 
   // digitalWrite(LED_BUILTIN, LOW);
   delay_handle_background();
-  // if (status == EdmiCMDReader::Status::Finish)
-  //   digitalWrite(LED_BUILTIN, HIGH);
-
-  // edmiread.step_trigger();
-  // Serial.printf("%9s\n", EdmiCMDReaderStatus().c_str());
-  // delay(200);
-  // if (kwhSerialNumber.length() == 0)
-  //   kwhSerialNumber = edmiread.edmi_R_serialnumber();
-  // Serial.println(kwhSerialNumber);
-  // delay(200);
 
 } // loop

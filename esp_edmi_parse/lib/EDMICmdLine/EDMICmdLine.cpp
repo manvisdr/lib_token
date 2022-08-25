@@ -1,5 +1,11 @@
 #include <EDMICmdLine.h>
 
+#if defined(TYPE_MK10E)
+#include <Type/MK10E.h>
+#elif defined(TYPE_MK6N)
+#include <Type/MK6N.h>
+#endif
+
 #define NUL 0x00  // NULL termination character
 #define STX 0x02  // START OF TEXT
 #define ETX 0x03  // END OF TEXT
@@ -16,29 +22,49 @@
 #define R_FUNC 0x52 // READ REGISTER
 #define L_FUNC 0x4C // LOGIN REGISTER
 
-#define SIZEOF_ARRAY(x) (sizeof(x) / sizeof(x[0]))
-
 // LOGIN - LEDMI,IMDEIMDE0
-const unsigned char register_login[15] = {0x4C, 0x45, 0x44, 0x4D, 0x49, 0x2C, 0x49, 0x4D, 0x44, 0x45, 0x49, 0x4D, 0x44, 0x45, 0x00};
-const unsigned char register_serialNum[] = {0xF0, 0x02};
-const unsigned char register_bP[] = {0x1E, 0x01};
-const unsigned char register_LbP[] = {0x1E, 0x02};
-const unsigned char register_Total[] = {0x1E, 0x00};
-const unsigned char register_logout[15] = {0x58};
+static uint8_t register_login[15] = {L_FUNC, 0x45, 0x44, 0x4D, 0x49, 0x2C, 0x49, 0x4D, 0x44, 0x45, 0x49, 0x4D, 0x44, 0x45, 0x00};
+static uint8_t register_serialNum[] = {0xF0, 0x02};
+static uint8_t register_logout[] = {0x58};
 
-enum class EdmiCMDReader::ErrorCode : uint8_t
+static const uint16_t registerBank[] PROGMEM =
+    {
+        REG_INSTAN_VOLTR,   // VOLT R
+        REG_INSTAN_VOLTS,   // VOLT S
+        REG_INSTAN_VOLTT,   // VOLT T
+        REG_INSTAN_CURRR,   // CURRENT R
+        REG_INSTAN_CURRS,   // CURRENT S
+        REG_INSTAN_CURRT,   // CURRENT T
+        REG_INSTAN_WATTR,   // WATT R
+        REG_INSTAN_WATTS,   // WATT S
+        REG_INSTAN_WATTT,   // WATT T
+        REG_INSTAN_PFACT,   // pF
+        REG_INSTAN_FREQU,   // FREQUENCY
+        REG_ENERGY_KVARH,   // kVarh
+        REG_ENERGY_KWHLBP,  // kwhLBP
+        REG_ENERGY_KWHBP,   // kwhBP
+        REG_ENERGY_KWHTOT}; // kwhTotal
+
+typedef enum
 {
-  NullError,
-  CannotWrite,
-  UnimplementedOperation,
-  RegisterNotFound,
-  AccessDenied,
-  WrongLength,
-  BadTypCode,
-  DataNotReady,
-  OutOfRange,
-  NotLoggedIn,
-};
+  REG_INS_VOLTR,     // VOLT R
+  REG_INS_VOLTS,     // VOLT S
+  REG_INS_VOLTT,     // VOLT T
+  REG_INS_CURRR,     // CURRENT R
+  REG_INS_CURRS,     // CURRENT S
+  REG_INS_CURRT,     // CURRENT T
+  REG_INS_WATTR,     // WATT R
+  REG_INS_WATTS,     // WATT S
+  REG_INS_WATTT,     // WATT T
+  REG_INS_PFACT,     // pF
+  REG_INS_FREQU,     // FREQUENCY
+  REG_ENG_KVARH,     // kVarh
+  REG_ENG_KWHLBP,    // kwhLBP
+  REG_ENG_KWHBP,     // kwhBP
+  REG_ENG_KWHTOT,    // kwhTotal
+  REG_SYS_SERNUMBER, // SERIAL NUMBER
+  REG_MEAS_ALL       // ALL MEASURE REGISTER
+} register_read;
 
 enum class EdmiCMDReader::Step : uint8_t
 {
@@ -46,30 +72,11 @@ enum class EdmiCMDReader::Step : uint8_t
   Started,
   Login,
   NotLogin,
+  Send,
   Read,
-  MultiRead,
   Logout,
   Finished
 };
-
-static short
-gencrc_16(short i)
-{
-  short j;
-  short k;
-  short crc;
-  k = i << 8;
-  crc = 0;
-  for (j = 0; j < 8; j++)
-  {
-    if ((crc ^ k) & 0x8000)
-      crc = (crc << 1) ^ 0x1021;
-    else
-      crc <<= 1;
-    k <<= 1;
-  }
-  return (crc);
-}
 
 static uint16_t ccitt_16[256] = {
     0x0000, 0x1021, 0x2042, 0x3063, 0x4084, 0x50A5, 0x60C6, 0x70E7, 0x8108,
@@ -103,7 +110,7 @@ static uint16_t ccitt_16[256] = {
     0x2E93, 0x3EB2, 0x0ED1, 0x1EF0};
 
 static unsigned short
-CalculateCharacterCRC16(unsigned short crc, unsigned char c)
+CalculateCharacterCRC16(unsigned short crc, uint8_t c)
 {
   return ((crc << 8) ^ ccitt_16[((crc >> 8) ^ c)]);
 }
@@ -141,12 +148,12 @@ float ConvertB32ToFloat(uint32_t b32)
   return result;
 }
 
-uint32_t bytearrayto32byte(char *data)
+uint32_t bytearrayto32byte(uint8_t *data)
 {
-  return ((uint32_t)data[0]) << 24 |
-         ((uint32_t)data[1]) << 16 |
-         ((uint32_t)data[2]) << 8 |
-         ((uint32_t)data[3]);
+  return ((long)data[0]) << 24 |
+         ((long)data[1]) << 16 |
+         ((long)data[2]) << 8 |
+         ((long)data[3]);
 }
 
 static uint16_t
@@ -154,17 +161,12 @@ CRC16buf(const uint8_t *data, uint16_t len)
 {
   uint8_t nTemp = STX; // CRC table index
   uint16_t crc = 0;    // Default value
-
   while (len--)
   {
     crc = (crc << 8) ^ ccitt_16[((crc >> 8) ^ nTemp)];
     nTemp = *data++;
-    // Serial.printf("%02X", crc, " ");
   }
   crc = (crc << 8) ^ ccitt_16[((crc >> 8) ^ nTemp)];
-  // Serial.printf("crc16_ccitt - ");
-  // Serial.printf("%02X", crc, " ");
-  // Serial.printf("\n");
   return crc;
 }
 
@@ -182,13 +184,13 @@ void EdmiCMDReader::begin(unsigned long baud)
   serial_.begin(baud, SERIAL_8N1, rx_, tx_);
 }
 
-void EdmiCMDReader::TX_raw(unsigned char ch)
+void EdmiCMDReader::TX_raw(uint8_t ch)
 {
   serial_.write(ch);
   serial_.flush();
 }
 
-void EdmiCMDReader::TX_byte(unsigned char d)
+void EdmiCMDReader::TX_byte(uint8_t d)
 {
   switch (d)
   {
@@ -205,7 +207,7 @@ void EdmiCMDReader::TX_byte(unsigned char d)
   }
 }
 
-void EdmiCMDReader::TX_cmd(unsigned char *cmd, unsigned short len)
+void EdmiCMDReader::TX_cmd(uint8_t *cmd, unsigned short len)
 {
   unsigned short i;
   unsigned short crc;
@@ -225,17 +227,17 @@ void EdmiCMDReader::TX_cmd(unsigned char *cmd, unsigned short len)
   /*
      Add the CRC
   */
-  EdmiCMDReader::TX_byte((unsigned char)(crc >> 8));
-  EdmiCMDReader::TX_byte((unsigned char)crc);
+  EdmiCMDReader::TX_byte((uint8_t)(crc >> 8));
+  EdmiCMDReader::TX_byte((uint8_t)crc);
   /*
      Add the ETX
   */
   EdmiCMDReader::TX_raw(ETX);
 }
 
-void EdmiCMDReader::edmi_R_FUNC(const byte *reg)
+void EdmiCMDReader::send_cmdR(const byte *reg)
 {
-  unsigned char registers[3] = {R_FUNC, reg[0], reg[1]};
+  uint8_t registers[3] = {R_FUNC, reg[0], reg[1]};
   TX_cmd(registers, sizeof(registers));
 }
 
@@ -256,7 +258,7 @@ bool EdmiCMDReader::RX_char(unsigned int timeout, byte *inChar)
   return false;
 }
 
-uint8_t EdmiCMDReader::RX_message(char *message, int maxMessageSize, unsigned int timeout)
+uint8_t EdmiCMDReader::RX_message(uint8_t *message, int maxMessageSize, unsigned int timeout)
 {
   byte inChar;
   int index = 0;
@@ -297,7 +299,7 @@ uint8_t EdmiCMDReader::RX_message(char *message, int maxMessageSize, unsigned in
           {
             if (index > 6)
             {
-              if (checkCRC((uint8_t *)message, index))
+              if (checkCRC(message, index))
               {
                 message[index] = '\0'; // good checksum, null terminate message
                 goodCheksum = true;
@@ -328,12 +330,27 @@ uint8_t EdmiCMDReader::RX_message(char *message, int maxMessageSize, unsigned in
   return index - 3;
 }
 
+void EdmiCMDReader::change_status(Status to)
+{
+  if (to == Status::ProtocolError || to == Status::TimeoutError || to == Status::Disconnect)
+    ++errors_;
+  else if (to == Status::ChecksumError)
+    ++checksum_errors_;
+  else if (to == Status::Finish)
+    ++successes_;
+
+  status_ = to;
+}
+
 void EdmiCMDReader::keepAlive()
 {
-  if (status_ == Status::Busy)
+  Serial.println("KEEPALIVE");
+  if (status_ == Status::Busy or status_ == Status::Ready)
     return;
-  char
+
+  uint8_t
       charAck[CHAR_RX_ACK];
+
   TX_raw(STX);
   TX_raw(ETX);
   RX_message(charAck, CHAR_RX_ACK, RX_TIMEOUT);
@@ -345,7 +362,7 @@ void EdmiCMDReader::keepAlive()
 
 void EdmiCMDReader::step_start()
 {
-  if (status_ == Status::Busy)
+  if (status_ == Status::Disconnect or status_ == Status::Busy)
     return;
 
   status_ = Status::Busy;
@@ -356,76 +373,104 @@ void EdmiCMDReader::step_login()
 {
   if (status_ != Status::Busy)
     return;
-  char
+
+  uint8_t
       charAck[CHAR_RX_ACK];
-  TX_cmd((unsigned char *)register_login, sizeof(register_login));
-  RX_message(charAck, CHAR_RX_ACK, RX_TIMEOUT);
+  size_t
+      len;
+
+  TX_cmd(register_login, sizeof(register_login));
+  len = RX_message(charAck, CHAR_RX_ACK, RX_TIMEOUT);
+  Serial.print("step_login() - len - ");
+  Serial.println(len);
   if (charAck[0] == ACK)
   {
+    Serial.println("step_login() -> ACK");
     if (step_ == Step::Started)
       step_ = Step::Read;
     else
       status_ = Status::LoggedIn;
   }
-  //
-  // else
-  //   status_ = Status::NotLogin;
+  else if (charAck[0] == CAN)
+  {
+    regError_ = (ErrorCode)charAck[1];
+  }
 }
 
 void EdmiCMDReader::step_logout()
 {
-  char
+  if (status_ != Status::Busy)
+    return;
+
+  uint8_t
       charAck[CHAR_RX_ACK];
-  TX_cmd((unsigned char *)register_logout, sizeof(register_logout));
-  RX_message(charAck, CHAR_RX_ACK, RX_TIMEOUT);
+  size_t
+      len;
+
+  TX_cmd(register_logout, sizeof(register_logout));
+  len = RX_message(charAck, CHAR_RX_ACK, RX_TIMEOUT);
+  Serial.print("step_logout() - len - ");
+  Serial.println(len);
   if (charAck[0] == ACK)
   {
     step_ = Step::Finished;
     status_ = Status::Finish;
+    return change_status(Status::Finish);
   }
 }
 
-String EdmiCMDReader::edmi_R_serialnumber(/*char *output, int len*/)
+bool EdmiCMDReader::check_RXReg(uint8_t *buff, uint8_t typeReg, uint8_t compare)
 {
-  bool
-      getSerialSuccess = false;
-  char
+  return (((uint16_t)buff[0] << 8) == ((uint16_t)typeReg << 8 |
+                                       (uint16_t)compare));
+}
+
+String EdmiCMDReader::read_Serialnumber(/*char *output, int len*/)
+{
+  uint8_t
       charData[CHAR_RX_DATA];
   size_t
       len;
   String output;
 
+  status_ = Status::Busy;
+
   step_login();
   if (status_ == Status::LoggedIn)
   {
-    edmi_R_FUNC(register_serialNum);
+    send_cmdR(register_serialNum);
     len = RX_message(charData, CHAR_RX_DATA, RX_TIMEOUT);
-    // Serial.println(len);
+    Serial.println(len);
     if (charData[0] == CAN)
     {
       regError_ = (ErrorCode)charData[1];
-      getSerialSuccess = false;
+      output = "";
     }
     else if (charData[0] == R_FUNC and charData[1] == register_serialNum[0] and charData[2] == register_serialNum[1])
     {
-      for (size_t i = 0; i < len - 3; i++)
+      for (size_t i = 0; i < len - 2; i++)
       {
-        output += charData[i + 3];
+        output += (char)charData[i + 3];
+        // Serial.printf("%2X", charData[i]);
+        // Serial.printf("%s", output);
       }
-      // Serial.println(output);
-      getSerialSuccess = true;
+      Serial.println(output);
+      _currentValues.serialNumber = output;
+      Serial.println(_currentValues.serialNumber);
     }
     else
-      getSerialSuccess = false;
+      output = "";
   }
+  status_ = Status::Connect;
   return output;
 }
 
-void EdmiCMDReader::loop()
+void EdmiCMDReader::read_looping()
 {
+
   if (status_ != Status::Busy or status_ == Status::Disconnect)
     return;
-  Serial.println("EdmiCMDReader::loop()");
+  Serial.println("looping");
   switch (step_)
   {
   case Step::Ready:
@@ -434,12 +479,12 @@ void EdmiCMDReader::loop()
     step_login();
     break;
   case Step::Read:
+    // step_read();
     read_default();
     break;
   case Step::Logout:
     step_logout();
     break;
-
   default:
     break;
   }
@@ -447,101 +492,634 @@ void EdmiCMDReader::loop()
 
 bool EdmiCMDReader::read_default()
 {
-  char
+  unsigned short
+      len;
+  len = sizeof(registerBank) / sizeof(registerBank[0]);
+  uint32_t
+      allData[len];
+  uint8_t
       charData[CHAR_RX_DATA];
-  char
+  uint8_t
       charBuffer[CHAR_DATA_FLOAT];
   size_t
-      len;
+      i = 0;
+  Serial.print("read_default() - len - ");
+  Serial.println(len);
+
   if (status_ == Status::Busy)
   {
-    edmi_R_FUNC(register_bP);
-    len = RX_message(charData, CHAR_RX_DATA, RX_TIMEOUT);
-    Serial.println(charData);
-    if (charData[0] == CAN)
+    while (i < len)
     {
-      regError_ = (ErrorCode)charData[1];
-      // return;
-    }
-    else if (charData[0] == R_FUNC and charData[1] == register_bP[0] and charData[2] == register_bP[1])
-    {
-      for (size_t i = 0; i < len - 3; i++)
+      uint16_t r = pgm_read_word(&registerBank[i++]);
+
+      uint8_t singlereg[2];
+      singlereg[0] = (r >> 8) & 0xFF;
+      singlereg[1] = (r)&0xFF;
+      uint8_t buff[] = {0x52, singlereg[0], singlereg[1]};
+      TX_cmd(buff, sizeof(buff));
+      unsigned short datalen = RX_message(charData, CHAR_RX_DATA, RX_TIMEOUT);
+
+      if (charData[0] == CAN)
       {
-        charBuffer[i] = charData[i + 3];
+        regError_ = (ErrorCode)charData[1];
+        return NAN;
       }
-    }
-    edmi_R_FUNC(register_LbP);
-    len = RX_message(charData, CHAR_RX_DATA, RX_TIMEOUT);
-    Serial.println(charData);
-    if (charData[0] == CAN)
-    {
-      regError_ = (ErrorCode)charData[1];
-      // return;
-    }
-    else if (charData[0] == R_FUNC and charData[1] == register_bP[0] and charData[2] == register_bP[1])
-    {
-      for (size_t i = 0; i < len - 3; i++)
+      else
       {
-        charBuffer[i] = charData[i + 3];
+
+        allData[i - 1] = ((long)charData[3]) << 24 |
+                         ((long)charData[4]) << 16 |
+                         ((long)charData[5]) << 8 |
+                         ((long)charData[6]);
+        // // }
+        Serial.printf("register ke - %d\n", i);
+        // Serial.printf("%.4f\n", ConvertB32ToFloat(allData[i - 1]));
       }
-      Serial.println(ConvertB32ToFloat(bytearrayto32byte(charBuffer)));
+      _currentValues.voltR = ConvertB32ToFloat(allData[0]) / 1000.0;
+      _currentValues.voltS = ConvertB32ToFloat(allData[1]) / 1000.0;
+      _currentValues.voltT = ConvertB32ToFloat(allData[2]) / 1000.0;
+      _currentValues.currentR = ConvertB32ToFloat(allData[3]) / 1000.0;
+      _currentValues.currentS = ConvertB32ToFloat(allData[4]) / 1000.0;
+      _currentValues.currentT = ConvertB32ToFloat(allData[5]) / 1000.0;
+      _currentValues.wattR = ConvertB32ToFloat(allData[6]) / 1000.0;
+      _currentValues.wattS = ConvertB32ToFloat(allData[7]) / 1000.0;
+      _currentValues.wattT = ConvertB32ToFloat(allData[8]) / 1000.0;
+      _currentValues.pf = ConvertB32ToFloat(allData[9]);
+      _currentValues.frequency = ConvertB32ToFloat(allData[10]);
+      _currentValues.kVarh = ConvertB32ToFloat(allData[11]);
+      _currentValues.kwhLWBP = ConvertB32ToFloat(allData[12]);
+      _currentValues.kwhWBP = ConvertB32ToFloat(allData[13]);
+      _currentValues.kwhTotal = ConvertB32ToFloat(allData[14]);
     }
-    edmi_R_FUNC(register_bP);
-    len = RX_message(charData, CHAR_RX_DATA, RX_TIMEOUT);
-    Serial.println(charData);
-    if (charData[0] == CAN)
-    {
-      regError_ = (ErrorCode)charData[1];
-      // return;
-    }
-    else if (charData[0] == R_FUNC and charData[1] == register_Total[0] and charData[2] == register_Total[1])
-    {
-      for (size_t i = 0; i < len - 3; i++)
-      {
-        charBuffer[i] = charData[i + 3];
-      }
-    }
+    Serial.printf("%.4f\n", _currentValues.voltR);
+    Serial.printf("%.4f\n", _currentValues.voltS);
+    Serial.printf("%.4f\n", _currentValues.voltT);
+    Serial.printf("%.4f\n", _currentValues.currentR);
+    Serial.printf("%.4f\n", _currentValues.currentS);
+    Serial.printf("%.4f\n", _currentValues.currentT);
+    Serial.printf("%.4f\n", _currentValues.wattR);
+    Serial.printf("%.4f\n", _currentValues.wattS);
+    Serial.printf("%.4f\n", _currentValues.wattT);
+    Serial.printf("%.4f\n", _currentValues.pf);
+    Serial.printf("%.4f\n", _currentValues.frequency);
+    Serial.printf("%.4f\n", _currentValues.kVarh);
+    Serial.printf("%.4f\n", _currentValues.kwhLWBP);
+    Serial.printf("%.4f\n", _currentValues.kwhWBP);
+    Serial.printf("%.4f\n", _currentValues.kwhTotal);
   }
+
   step_ = Step::Logout;
   return true;
 }
 
 String EdmiCMDReader::serialNumber()
 {
-  if (!read_default()) // Update vales if necessary
-    return String(""); // Update did not work, return NAN
+  if (strcmp(read_Serialnumber().c_str(), "") == 0)
+  {
+    Serial.println("KOSONG");
+    return String("");
+  }
 
   return _currentValues.serialNumber;
 }
 
-float EdmiCMDReader::kVarh()
-{
-  if (!read_default())
-    return NAN;
+float EdmiCMDReader::voltR() { return _currentValues.voltR; }
+float EdmiCMDReader::voltS() { return _currentValues.voltS; }
+float EdmiCMDReader::voltT() { return _currentValues.voltT; }
+float EdmiCMDReader::currentR() { return _currentValues.currentR; }
+float EdmiCMDReader::currentS() { return _currentValues.currentS; }
+float EdmiCMDReader::currentT() { return _currentValues.currentT; }
+float EdmiCMDReader::wattR() { return _currentValues.wattR; }
+float EdmiCMDReader::wattS() { return _currentValues.wattS; }
+float EdmiCMDReader::wattT() { return _currentValues.wattT; }
+float EdmiCMDReader::pf() { return _currentValues.pf; }
+float EdmiCMDReader::frequency() { return _currentValues.frequency; }
+float EdmiCMDReader::kVarh() { return _currentValues.kVarh; }
+float EdmiCMDReader::kwhWBP() { return _currentValues.kwhWBP; }
+float EdmiCMDReader::kwhLWBP() { return _currentValues.kwhLWBP; }
+float EdmiCMDReader::kwhTotal() { return _currentValues.kwhTotal; }
 
-  return _currentValues.kVarh;
+float EdmiCMDReader::read_voltR()
+{
+  uint32_t
+      oneData;
+  uint8_t
+      charData[CHAR_RX_DATA];
+
+  if (status_ == Status::Busy)
+  {
+    uint16_t r = pgm_read_word(&registerBank[0]);
+    uint8_t buff[] = {0x52, (uint8_t)(r >> 8), (uint8_t)(r)};
+    TX_cmd(buff, sizeof(buff));
+    unsigned short datalen = RX_message(charData, CHAR_RX_DATA, RX_TIMEOUT);
+    if (charData[0] == CAN)
+    {
+      regError_ = (ErrorCode)charData[1];
+      return NAN;
+    }
+    else
+    {
+      oneData = ((long)charData[3]) << 24 |
+                ((long)charData[4]) << 16 |
+                ((long)charData[5]) << 8 |
+                ((long)charData[6]);
+      Serial.printf("%.4f\n", ConvertB32ToFloat(oneData));
+      _currentValues.voltR = ConvertB32ToFloat(oneData) / 1000.0;
+      Serial.printf("%.4f\n", _currentValues.voltR);
+      step_ = Step::Logout;
+      return _currentValues.voltR;
+    }
+  }
+  else
+    return NAN;
 }
 
-float EdmiCMDReader::kwhWBP()
+float EdmiCMDReader::read_voltS()
 {
-  if (!read_default())
-    return NAN;
+  uint32_t
+      oneData;
+  uint8_t
+      charData[CHAR_RX_DATA];
 
-  return _currentValues.kwhWBP;
+  if (status_ == Status::Busy)
+  {
+    uint16_t r = pgm_read_word(&registerBank[1]);
+    uint8_t buff[] = {0x52, (uint8_t)(r >> 8), (uint8_t)(r)};
+    TX_cmd(buff, sizeof(buff));
+    unsigned short datalen = RX_message(charData, CHAR_RX_DATA, RX_TIMEOUT);
+    if (charData[0] == CAN)
+    {
+      regError_ = (ErrorCode)charData[1];
+      return NAN;
+    }
+    else
+    {
+      oneData = ((long)charData[3]) << 24 |
+                ((long)charData[4]) << 16 |
+                ((long)charData[5]) << 8 |
+                ((long)charData[6]);
+      Serial.printf("%.4f\n", ConvertB32ToFloat(oneData));
+      _currentValues.voltS = ConvertB32ToFloat(oneData) / 1000.0;
+      Serial.printf("%.4f\n", _currentValues.voltS);
+      step_ = Step::Logout;
+      return _currentValues.voltS;
+    }
+  }
+  else
+    return NAN;
 }
 
-float EdmiCMDReader::kwhLWBP()
+float EdmiCMDReader::read_voltT()
 {
-  if (!read_default())
-    return NAN;
+  uint32_t
+      oneData;
+  uint8_t
+      charData[CHAR_RX_DATA];
 
-  return _currentValues.kwhLWBP;
+  if (status_ == Status::Busy)
+  {
+    uint16_t r = pgm_read_word(&registerBank[2]);
+    uint8_t buff[] = {0x52, (uint8_t)(r >> 8), (uint8_t)(r)};
+    TX_cmd(buff, sizeof(buff));
+    unsigned short datalen = RX_message(charData, CHAR_RX_DATA, RX_TIMEOUT);
+    if (charData[0] == CAN)
+    {
+      regError_ = (ErrorCode)charData[1];
+      return NAN;
+    }
+    else
+    {
+      oneData = ((long)charData[3]) << 24 |
+                ((long)charData[4]) << 16 |
+                ((long)charData[5]) << 8 |
+                ((long)charData[6]);
+      Serial.printf("%.4f\n", ConvertB32ToFloat(oneData));
+      _currentValues.voltT = ConvertB32ToFloat(oneData) / 1000.0;
+      Serial.printf("%.4f\n", _currentValues.voltT);
+      step_ = Step::Logout;
+      return _currentValues.voltT;
+    }
+  }
+  else
+    return NAN;
 }
 
-float EdmiCMDReader::kwhTotal()
+float EdmiCMDReader::read_currentR()
 {
-  if (!read_default())
-    return NAN;
+  uint32_t
+      oneData;
+  uint8_t
+      charData[CHAR_RX_DATA];
 
-  return _currentValues.kwhTotal;
+  if (status_ == Status::Busy)
+  {
+    uint16_t r = pgm_read_word(&registerBank[3]);
+    uint8_t buff[] = {0x52, (uint8_t)(r >> 8), (uint8_t)(r)};
+    TX_cmd(buff, sizeof(buff));
+    unsigned short datalen = RX_message(charData, CHAR_RX_DATA, RX_TIMEOUT);
+    if (charData[0] == CAN)
+    {
+      regError_ = (ErrorCode)charData[1];
+      return NAN;
+    }
+    else
+    {
+      oneData = ((long)charData[3]) << 24 |
+                ((long)charData[4]) << 16 |
+                ((long)charData[5]) << 8 |
+                ((long)charData[6]);
+      Serial.printf("%.4f\n", ConvertB32ToFloat(oneData));
+      _currentValues.currentR = ConvertB32ToFloat(oneData) / 1000.0;
+      Serial.printf("%.4f\n", _currentValues.currentR);
+      step_ = Step::Logout;
+      return _currentValues.currentR;
+    }
+  }
+  else
+    return NAN;
+}
+
+float EdmiCMDReader::read_currentS()
+{
+  uint32_t
+      oneData;
+  uint8_t
+      charData[CHAR_RX_DATA];
+
+  if (status_ == Status::Busy)
+  {
+    uint16_t r = pgm_read_word(&registerBank[4]);
+    uint8_t buff[] = {0x52, (uint8_t)(r >> 8), (uint8_t)(r)};
+    TX_cmd(buff, sizeof(buff));
+    unsigned short datalen = RX_message(charData, CHAR_RX_DATA, RX_TIMEOUT);
+    if (charData[0] == CAN)
+    {
+      regError_ = (ErrorCode)charData[1];
+      return NAN;
+    }
+    else
+    {
+      oneData = ((long)charData[3]) << 24 |
+                ((long)charData[4]) << 16 |
+                ((long)charData[5]) << 8 |
+                ((long)charData[6]);
+      Serial.printf("%.4f\n", ConvertB32ToFloat(oneData));
+      _currentValues.currentS = ConvertB32ToFloat(oneData) / 1000.0;
+      Serial.printf("%.4f\n", _currentValues.currentS);
+      step_ = Step::Logout;
+      return _currentValues.currentS;
+    }
+  }
+  else
+    return NAN;
+}
+
+float EdmiCMDReader::read_currentT()
+{
+  uint32_t
+      oneData;
+  uint8_t
+      charData[CHAR_RX_DATA];
+
+  if (status_ == Status::Busy)
+  {
+    uint16_t r = pgm_read_word(&registerBank[5]);
+    uint8_t buff[] = {0x52, (uint8_t)(r >> 8), (uint8_t)(r)};
+    TX_cmd(buff, sizeof(buff));
+    unsigned short datalen = RX_message(charData, CHAR_RX_DATA, RX_TIMEOUT);
+    if (charData[0] == CAN)
+    {
+      regError_ = (ErrorCode)charData[1];
+      return NAN;
+    }
+    else
+    {
+      oneData = ((long)charData[3]) << 24 |
+                ((long)charData[4]) << 16 |
+                ((long)charData[5]) << 8 |
+                ((long)charData[6]);
+      Serial.printf("%.4f\n", ConvertB32ToFloat(oneData));
+      _currentValues.currentT = ConvertB32ToFloat(oneData) / 1000.0;
+      Serial.printf("%.4f\n", _currentValues.currentT);
+      step_ = Step::Logout;
+      return _currentValues.currentT;
+    }
+  }
+  else
+    return NAN;
+}
+
+float EdmiCMDReader::read_wattR()
+{
+  uint32_t
+      oneData;
+  uint8_t
+      charData[CHAR_RX_DATA];
+
+  if (status_ == Status::Busy)
+  {
+    uint16_t r = pgm_read_word(&registerBank[6]);
+    uint8_t buff[] = {0x52, (uint8_t)(r >> 8), (uint8_t)(r)};
+    TX_cmd(buff, sizeof(buff));
+    unsigned short datalen = RX_message(charData, CHAR_RX_DATA, RX_TIMEOUT);
+    if (charData[0] == CAN)
+    {
+      regError_ = (ErrorCode)charData[1];
+      return NAN;
+    }
+    else
+    {
+      oneData = ((long)charData[3]) << 24 |
+                ((long)charData[4]) << 16 |
+                ((long)charData[5]) << 8 |
+                ((long)charData[6]);
+      Serial.printf("%.4f\n", ConvertB32ToFloat(oneData));
+      _currentValues.wattR = ConvertB32ToFloat(oneData) / 1000.0;
+      Serial.printf("%.4f\n", _currentValues.wattR);
+      step_ = Step::Logout;
+      return _currentValues.wattR;
+    }
+  }
+  else
+    return NAN;
+}
+
+float EdmiCMDReader::read_wattS()
+{
+  uint32_t
+      oneData;
+  uint8_t
+      charData[CHAR_RX_DATA];
+
+  if (status_ == Status::Busy)
+  {
+    uint16_t r = pgm_read_word(&registerBank[7]);
+    uint8_t buff[] = {0x52, (uint8_t)(r >> 8), (uint8_t)(r)};
+    TX_cmd(buff, sizeof(buff));
+    unsigned short datalen = RX_message(charData, CHAR_RX_DATA, RX_TIMEOUT);
+    if (charData[0] == CAN)
+    {
+      regError_ = (ErrorCode)charData[1];
+      return NAN;
+    }
+    else
+    {
+      oneData = ((long)charData[3]) << 24 |
+                ((long)charData[4]) << 16 |
+                ((long)charData[5]) << 8 |
+                ((long)charData[6]);
+      Serial.printf("%.4f\n", ConvertB32ToFloat(oneData));
+      _currentValues.wattR = ConvertB32ToFloat(oneData) / 1000.0;
+      Serial.printf("%.4f\n", _currentValues.wattR);
+      step_ = Step::Logout;
+      return _currentValues.wattR;
+    }
+  }
+  else
+    return NAN;
+}
+
+float EdmiCMDReader::read_wattT()
+{
+  uint32_t
+      oneData;
+  uint8_t
+      charData[CHAR_RX_DATA];
+
+  if (status_ == Status::Busy)
+  {
+    uint16_t r = pgm_read_word(&registerBank[8]);
+    uint8_t buff[] = {0x52, (uint8_t)(r >> 8), (uint8_t)(r)};
+    TX_cmd(buff, sizeof(buff));
+    unsigned short datalen = RX_message(charData, CHAR_RX_DATA, RX_TIMEOUT);
+    if (charData[0] == CAN)
+    {
+      regError_ = (ErrorCode)charData[1];
+      return NAN;
+    }
+    else
+    {
+      oneData = ((long)charData[3]) << 24 |
+                ((long)charData[4]) << 16 |
+                ((long)charData[5]) << 8 |
+                ((long)charData[6]);
+      Serial.printf("%.4f\n", ConvertB32ToFloat(oneData));
+      _currentValues.wattT = ConvertB32ToFloat(oneData) / 1000.0;
+      Serial.printf("%.4f\n", _currentValues.wattT);
+      step_ = Step::Logout;
+      return _currentValues.wattT;
+    }
+  }
+  else
+    return NAN;
+}
+
+float EdmiCMDReader::read_pf()
+{
+  uint32_t
+      oneData;
+  uint8_t
+      charData[CHAR_RX_DATA];
+
+  if (status_ == Status::Busy)
+  {
+    uint16_t r = pgm_read_word(&registerBank[9]);
+    uint8_t buff[] = {0x52, (uint8_t)(r >> 8), (uint8_t)(r)};
+    TX_cmd(buff, sizeof(buff));
+    unsigned short datalen = RX_message(charData, CHAR_RX_DATA, RX_TIMEOUT);
+    if (charData[0] == CAN)
+    {
+      regError_ = (ErrorCode)charData[1];
+      return NAN;
+    }
+    else
+    {
+      oneData = ((long)charData[3]) << 24 |
+                ((long)charData[4]) << 16 |
+                ((long)charData[5]) << 8 |
+                ((long)charData[6]);
+      Serial.printf("%.4f\n", ConvertB32ToFloat(oneData));
+      _currentValues.pf = ConvertB32ToFloat(oneData);
+      Serial.printf("%.4f\n", _currentValues.pf);
+      step_ = Step::Logout;
+      return _currentValues.pf;
+    }
+  }
+  else
+    return NAN;
+}
+
+float EdmiCMDReader::read_frequency()
+{
+  uint32_t
+      oneData;
+  uint8_t
+      charData[CHAR_RX_DATA];
+
+  if (status_ == Status::Busy)
+  {
+    uint16_t r = pgm_read_word(&registerBank[10]);
+    uint8_t buff[] = {0x52, (uint8_t)(r >> 8), (uint8_t)(r)};
+    TX_cmd(buff, sizeof(buff));
+    unsigned short datalen = RX_message(charData, CHAR_RX_DATA, RX_TIMEOUT);
+    if (charData[0] == CAN)
+    {
+      regError_ = (ErrorCode)charData[1];
+      return NAN;
+    }
+    else
+    {
+      oneData = ((long)charData[3]) << 24 |
+                ((long)charData[4]) << 16 |
+                ((long)charData[5]) << 8 |
+                ((long)charData[6]);
+      Serial.printf("%.4f\n", ConvertB32ToFloat(oneData));
+      _currentValues.frequency = ConvertB32ToFloat(oneData);
+      Serial.printf("%.4f\n", _currentValues.frequency);
+      step_ = Step::Logout;
+      return _currentValues.frequency;
+    }
+  }
+  else
+    return NAN;
+}
+
+float EdmiCMDReader::read_kVarh()
+{
+  uint32_t
+      oneData;
+  uint8_t
+      charData[CHAR_RX_DATA];
+
+  if (status_ == Status::Busy)
+  {
+    uint16_t r = pgm_read_word(&registerBank[11]);
+    uint8_t buff[] = {0x52, (uint8_t)(r >> 8), (uint8_t)(r)};
+    TX_cmd(buff, sizeof(buff));
+    unsigned short datalen = RX_message(charData, CHAR_RX_DATA, RX_TIMEOUT);
+    if (charData[0] == CAN)
+    {
+      regError_ = (ErrorCode)charData[1];
+      return NAN;
+    }
+    else
+    {
+      oneData = ((long)charData[3]) << 24 |
+                ((long)charData[4]) << 16 |
+                ((long)charData[5]) << 8 |
+                ((long)charData[6]);
+      Serial.printf("%.4f\n", ConvertB32ToFloat(oneData));
+      _currentValues.kVarh = ConvertB32ToFloat(oneData);
+      Serial.printf("%.4f\n", _currentValues.kVarh);
+      step_ = Step::Logout;
+      return _currentValues.kVarh;
+    }
+  }
+  else
+    return NAN;
+}
+
+float EdmiCMDReader::read_kwhWBP()
+{
+  uint32_t
+      oneData;
+  uint8_t
+      charData[CHAR_RX_DATA];
+
+  if (status_ == Status::Busy)
+  {
+    uint16_t r = pgm_read_word(&registerBank[12]);
+    uint8_t buff[] = {0x52, (uint8_t)(r >> 8), (uint8_t)(r)};
+    TX_cmd(buff, sizeof(buff));
+    unsigned short datalen = RX_message(charData, CHAR_RX_DATA, RX_TIMEOUT);
+    if (charData[0] == CAN)
+    {
+      regError_ = (ErrorCode)charData[1];
+      return NAN;
+    }
+    else
+    {
+      oneData = ((long)charData[3]) << 24 |
+                ((long)charData[4]) << 16 |
+                ((long)charData[5]) << 8 |
+                ((long)charData[6]);
+      Serial.printf("%.4f\n", ConvertB32ToFloat(oneData));
+      _currentValues.kwhWBP = ConvertB32ToFloat(oneData);
+      Serial.printf("%.4f\n", _currentValues.kwhWBP);
+      step_ = Step::Logout;
+      return _currentValues.kwhWBP;
+    }
+  }
+  else
+    return NAN;
+}
+
+float EdmiCMDReader::read_kwhLWBP()
+{
+  uint32_t
+      oneData;
+  uint8_t
+      charData[CHAR_RX_DATA];
+
+  if (status_ == Status::Busy)
+  {
+    uint16_t r = pgm_read_word(&registerBank[13]);
+    uint8_t buff[] = {0x52, (uint8_t)(r >> 8), (uint8_t)(r)};
+    TX_cmd(buff, sizeof(buff));
+    unsigned short datalen = RX_message(charData, CHAR_RX_DATA, RX_TIMEOUT);
+    if (charData[0] == CAN)
+    {
+      regError_ = (ErrorCode)charData[1];
+      return NAN;
+    }
+    else
+    {
+      oneData = ((long)charData[3]) << 24 |
+                ((long)charData[4]) << 16 |
+                ((long)charData[5]) << 8 |
+                ((long)charData[6]);
+      Serial.printf("%.4f\n", ConvertB32ToFloat(oneData));
+      _currentValues.kwhLWBP = ConvertB32ToFloat(oneData);
+      Serial.printf("%.4f\n", _currentValues.kwhLWBP);
+      step_ = Step::Logout;
+      return _currentValues.kwhLWBP;
+    }
+  }
+  else
+    return NAN;
+}
+
+float EdmiCMDReader::read_kwhTotal()
+{
+  uint32_t
+      oneData;
+  uint8_t
+      charData[CHAR_RX_DATA];
+
+  if (status_ == Status::Busy)
+  {
+    uint16_t r = pgm_read_word(&registerBank[14]);
+    uint8_t buff[] = {0x52, (uint8_t)(r >> 8), (uint8_t)(r)};
+    TX_cmd(buff, sizeof(buff));
+    unsigned short datalen = RX_message(charData, CHAR_RX_DATA, RX_TIMEOUT);
+    if (charData[0] == CAN)
+    {
+      regError_ = (ErrorCode)charData[1];
+      return NAN;
+    }
+    else
+    {
+      oneData = ((long)charData[3]) << 24 |
+                ((long)charData[4]) << 16 |
+                ((long)charData[5]) << 8 |
+                ((long)charData[6]);
+      Serial.printf("%.4f\n", ConvertB32ToFloat(oneData));
+      _currentValues.kwhTotal = ConvertB32ToFloat(oneData);
+      Serial.printf("%.4f\n", _currentValues.kwhTotal);
+      step_ = Step::Logout;
+      return _currentValues.kwhTotal;
+    }
+  }
+  else
+    return NAN;
 }
