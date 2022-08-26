@@ -451,8 +451,7 @@ String EdmiCMDReader::read_Serialnumber(/*char *output, int len*/)
       for (size_t i = 0; i < len - 3; i++)
       {
         output += (char)charData[i + 3];
-        Serial.printf("%d->", i);
-        Serial.printf("%2X", charData[i]);
+        // Serial.printf("%2X", charData[i]);
         // Serial.printf("%s", output);
       }
       Serial.println(output);

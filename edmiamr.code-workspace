@@ -1,15 +1,8 @@
 {
 	"folders": [
 		{
-			"path": "arduino_ascii"
-		},
-		{
 			"name": "esp_amr_v1",
 			"path": "esp_amr_v1"
-		},
-		{
-			"name": "arduino_mega_edmiparse",
-			"path": "arduino_mega_edmiparse"
 		},
 		{
 			"name": "esp_amr_soft",
@@ -18,6 +11,10 @@
 		{
 			"name": "esp_edmi_parse",
 			"path": "esp_edmi_parse"
+		},
+		{
+			"name": "esp_monkwh_v1",
+			"path": "esp_monkwh_v1"
 		}
 	],
 	"settings": {
