@@ -16,6 +16,9 @@
 #define GET_CHIPID() ((uint16_t)(ESP.getEfuseMac() >> 32))
 #endif
 
+#define STRINGIFY(s) STRINGIFY1(s)
+#define STRINGIFY1(s) #s
+
 #if defined(ARDUINO_ARCH_ESP32)
 #include <SPIFFS.h>
 fs::SPIFFSFS &FlashFS = SPIFFS;
@@ -1215,8 +1218,8 @@ void setup()
   else
   { // //server.println("load error");
   }
-  config.apid = "MEL_MonKWh_0001";
-  config.hostName = "MEL_MonKWh_0001";
+  config.apid = String(WIFI_SSID);
+  config.hostName = String(WIFI_SSID);
   config.autoReset = false;
   config.autoReconnect = true;
   config.reconnectInterval = 1;
@@ -1248,6 +1251,11 @@ void setup()
 
 void loop()
 {
+  if (kwhID.length() == 0)
+  {
+    kwhID = edmiread.serialNumber();
+    server.println(kwhID);
+  }
   backgroundTask();
   edmiread.read_looping();
   EdmiCMDReader::Status status = edmiread.status();
@@ -1261,6 +1269,7 @@ void loop()
   else if (status == EdmiCMDReader::Status::Finish)
   {
     String allDatas = "*" +
+                      customerID + "*" +
                       kwhID + "*" +
                       String(edmiread.voltR(), 4).c_str() + "*" +
                       String(edmiread.voltS(), 4).c_str() + "*" +
@@ -1268,19 +1277,20 @@ void loop()
                       String(edmiread.currentR(), 4).c_str() + "*" +
                       String(edmiread.currentR(), 4).c_str() + "*" +
                       String(edmiread.currentT(), 4).c_str() + "*" +
-                      String(edmiread.wattR(), 4).c_str() + "*" +
-                      String(edmiread.wattS(), 4).c_str() + "*" +
-                      String(edmiread.wattT(), 4).c_str() + "*" +
+                      String(edmiread.wattR() / 10.0, 4).c_str() + "*" +
+                      String(edmiread.wattS() / 10.0, 4).c_str() + "*" +
+                      String(edmiread.wattT() / 10.0, 4).c_str() + "*" +
                       String(edmiread.pf(), 4).c_str() + "*" +
                       String(edmiread.frequency(), 4).c_str() + "*" +
-                      String(edmiread.kVarh(), 0).c_str() + "*" +
-                      String(edmiread.kwhLWBP(), 0).c_str() + "*" +
-                      String(edmiread.kwhWBP(), 0).c_str() + "*" +
-                      String(edmiread.kwhTotal(), 0) +
+                      String(edmiread.kVarh() / 1000.0, 0).c_str() + "*" +
+                      String(edmiread.kwhLWBP() / 1000.0, 0).c_str() + "*" +
+                      String(edmiread.kwhWBP() / 1000.0, 0).c_str() + "*" +
+                      String(edmiread.kwhTotal() / 1000.0, 0).c_str() +
                       "#";
 
     if (enableLAN)
     {
+      Serial.println("SEND WITH MQTT");
       mqttPublish(allDatas);
     }
     else if (enableLora)
@@ -1302,4 +1312,5 @@ void loop()
 
   // digitalWrite(LED_BUILTIN, LOW);
   BackgroundDelay();
+
 } // loop

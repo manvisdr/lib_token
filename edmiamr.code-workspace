@@ -1,20 +1,28 @@
 {
 	"folders": [
 		{
-			"name": "esp_amr_v1",
-			"path": "esp_amr_v1"
-		},
-		{
-			"name": "esp_amr_soft",
-			"path": "esp_amr_soft"
-		},
-		{
 			"name": "esp_edmi_parse",
 			"path": "esp_edmi_parse"
 		},
 		{
-			"name": "esp_monkwh_v1",
-			"path": "esp_monkwh_v1"
+			"name": "arduino_dlms",
+			"path": "arduino_dlms"
+		},
+		{
+			"name": "esp_monkwh_v1_lora",
+			"path": "esp_monkwh_v1_lora"
+		},
+		{
+			"name": "Lora-gateway",
+			"path": "Lora-gateway"
+		},
+		{
+			"name": "esp_spiffs_setting",
+			"path": "esp_spiffs_setting"
+		},
+		{
+			"name": "esp_monkwh_dlms_v1_lora",
+			"path": "esp_monkwh_dlms_v1_lora"
 		}
 	],
 	"settings": {

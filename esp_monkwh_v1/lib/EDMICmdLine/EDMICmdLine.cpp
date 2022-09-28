@@ -4,6 +4,8 @@
 #include <Type/MK10E.h>
 #elif defined(TYPE_MK6N)
 #include <Type/MK6N.h>
+#elif defined(TYPE_MK6E)
+#include <Type/MK6E.h>
 #endif
 
 #define NUL 0x00  // NULL termination character

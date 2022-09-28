@@ -1,0 +1,31 @@
+{
+  "device": {
+    "id": 455544,
+    "status": "running"
+  },
+  "meter": {
+    "id": 2424242,
+    "serialnum": 12414314,
+    "type": "MK10E"
+  },
+  "lora": {
+    "boolean": true,
+    "devaddr": "260D6ECC",
+    "nwkskey": "1FD053B476BF4F732DC8CF5E565538B9",
+    "appskey": "2EE8E2940E6799AD78F9F4C6DA8C53D1"
+  },
+  "mqtt": {
+    "boolean": true,
+    "server": 17435146,
+    "port": 1883,
+    "user": "mgiadmin",
+    "pass": "1234567890"
+  },
+  "lan": {
+    "boolean": true,
+    "ip": 17435146,
+    "netmask": 17435146,
+    "gateway": 17435146,
+    "dns": 17435146
+  }
+}
