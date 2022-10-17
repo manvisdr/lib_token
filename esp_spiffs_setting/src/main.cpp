@@ -36,7 +36,7 @@ struct meterConf
 {
   int id;
   int serialnum;
-  char type[5];
+  char type[6];
 };
 
 struct loraConf
@@ -75,43 +75,43 @@ lanConf lanconf;
 char serial_buffer[BUFFER_SIZE];
 int buffer_position;
 
-int ipStringToInt(const char *pDottedQuad, unsigned int *pIpAddr)
-{
-  unsigned int byte3;
-  unsigned int byte2;
-  unsigned int byte1;
-  unsigned int byte0;
-  char dummyString[2];
+// int ipStringToInt(const char *pDottedQuad, unsigned int *pIpAddr)
+// {
+//   unsigned int byte3;
+//   unsigned int byte2;
+//   unsigned int byte1;
+//   unsigned int byte0;
+//   char dummyString[2];
 
-  /* The dummy string with specifier %1s searches for a non-whitespace char
-   * after the last number. If it is found, the result of sscanf will be 5
-   * instead of 4, indicating an erroneous format of the ip-address.
-   */
-  if (sscanf(pDottedQuad, "%u.%u.%u.%u%1s", &byte3, &byte2, &byte1, &byte0,
-             dummyString) == 4)
-  {
-    if ((byte3 < 256) && (byte2 < 256) && (byte1 < 256) && (byte0 < 256))
-    {
-      *pIpAddr = (byte3 << 24) + (byte2 << 16) + (byte1 << 8) + byte0;
+//   /* The dummy string with specifier %1s searches for a non-whitespace char
+//    * after the last number. If it is found, the result of sscanf will be 5
+//    * instead of 4, indicating an erroneous format of the ip-address.
+//    */
+//   if (sscanf(pDottedQuad, "%u.%u.%u.%u%1s", &byte3, &byte2, &byte1, &byte0,
+//              dummyString) == 4)
+//   {
+//     if ((byte3 < 256) && (byte2 < 256) && (byte1 < 256) && (byte0 < 256))
+//     {
+//       *pIpAddr = (byte3 << 24) + (byte2 << 16) + (byte1 << 8) + byte0;
 
-      return 1;
-    }
-  }
+//       return 1;
+//     }
+//   }
 
-  return 0;
-}
+//   return 0;
+// }
 
-void printIpFromInt(unsigned int ip)
-{
-  unsigned char bytes[4];
-  char buff[20];
-  bytes[0] = ip & 0xFF;
-  bytes[1] = (ip >> 8) & 0xFF;
-  bytes[2] = (ip >> 16) & 0xFF;
-  bytes[3] = (ip >> 24) & 0xFF;
-  sprintf("%d.%d.%d.%d\n", buff, bytes[3], bytes[2], bytes[1], bytes[0]);
-  Serial.println(buff);
-}
+// void printIpFromInt(unsigned int ip)
+// {
+//   unsigned char bytes[4];
+//   char buff[20];
+//   bytes[0] = ip & 0xFF;
+//   bytes[1] = (ip >> 8) & 0xFF;
+//   bytes[2] = (ip >> 16) & 0xFF;
+//   bytes[3] = (ip >> 24) & 0xFF;
+//   sprintf("%d.%d.%d.%d\n", buff, bytes[3], bytes[2], bytes[1], bytes[0]);
+//   Serial.println(buff);
+// }
 
 void sendMessagePacket(char message[])
 {
@@ -208,12 +208,12 @@ void setEth()
 
 void setup()
 {
-  Serial.begin(115200);
+  Serial.begin(9600);
   while (!Serial)
     ;
 
   delay(200);
-  CS.print();
+  // CS.print();
   doc = CS.get();
   // save configuration as file
   // CS.set(configDoc);
@@ -275,11 +275,11 @@ void readAll()
   lanconf.gateway = doc["lan"]["gateway"];
   lanconf.dns = doc["lan"]["dns"];
 
-  Serial.printf("I|%d|%s|", deviceconf.id, deviceconf.status);
-  Serial.printf("K|%d|%d|%s|", meterconf.id, meterconf.serialnum, meterconf.type);
-  Serial.printf("L|%d|%s|%s|%s|", loraconf.enable, loraconf.devaddr, loraconf.nwkskey, loraconf.appskey);
-  Serial.printf("M|%d|%d|%d|%s|%s|", mqttconf.enable, mqttconf.server, mqttconf.port, mqttconf.user, mqttconf.pass);
-  Serial.printf("E|%d|%d|%d|%d|%d|", lanconf.enable, lanconf.ip, lanconf.netmask, lanconf.gateway, lanconf.dns);
+  Serial.printf("I|%d|%s| ", deviceconf.id, deviceconf.status);
+  Serial.printf("K|%d|%d|%s| ", meterconf.id, meterconf.serialnum, meterconf.type);
+  Serial.printf("L|%d|%s|%s|%s| ", loraconf.enable, loraconf.devaddr, loraconf.nwkskey, loraconf.appskey);
+  Serial.printf("M|%d|%d|%d|%s|%s| ", mqttconf.enable, mqttconf.server, mqttconf.port, mqttconf.user, mqttconf.pass);
+  Serial.printf("E|%d|%d|%d|%d|%d| >", lanconf.enable, lanconf.ip, lanconf.netmask, lanconf.gateway, lanconf.dns);
 }
 
 void loop()
@@ -325,7 +325,7 @@ void loop()
       {
       case REGA:
         // readAll();
-        Serial.println("writeall");
+        Serial.print(msg);
         break;
       case REGE:
         // parseEth(msg);

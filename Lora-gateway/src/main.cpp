@@ -1,12 +1,17 @@
 #include <lorawan.h>
 #include <TinyGPS++.h>
 TinyGPSPlus gps;
-#define AU_915
+// #define AU_915
 #define gpsSerial Serial2
+
 // ABP Credentials
-const char *devAddr = "00aedb72";
-const char *nwkSKey = "1FD053B476BF4F732DC8CF5E565538B9";
-const char *appSKey = "2EE8E2940E6799AD78F9F4C6DA8C53D1";
+// const char *devAddr = "00aedb72";
+// const char *nwkSKey = "1FD053B476BF4F732DC8CF5E565538B9";
+// const char *appSKey = "2EE8E2940E6799AD78F9F4C6DA8C53D1";
+
+const char *devAddr = "15111111";
+const char *nwkSKey = "87A35777F816A6D00635D5BF11AC6E7D";
+const char *appSKey = "40195AAB5D7B2C0ABBA4D8B6BFC7BB5B";
 
 const unsigned long interval = 5000; // 10 s interval to send message
 unsigned long previousMillis = 0;    // will store last time message sent
@@ -95,47 +100,47 @@ void setup()
   Serial.begin(115200);
   Serial.println("Start..");
   gpsSerial.begin(9600, SERIAL_8N1, 21, 22);
-  // if (!lora.init())
-  // {
-  //   Serial.println("RFM95 not detected");
-  //   delay(5000);
-  //   return;
-  // }
-  // lora.setDeviceClass(CLASS_C);
-  // lora.setDataRate(SF7BW125);
-  // lora.setChannel(MULTI);
-  // lora.setNwkSKey(nwkSKey);
-  // lora.setAppSKey(appSKey);
-  // lora.setDevAddr(devAddr);
+  if (!lora.init())
+  {
+    Serial.println("RFM95 not detected");
+    delay(5000);
+    return;
+  }
+  lora.setDeviceClass(CLASS_C);
+  lora.setDataRate(SF7BW125);
+  lora.setChannel(MULTI);
+  lora.setNwkSKey(nwkSKey);
+  lora.setAppSKey(appSKey);
+  lora.setDevAddr(devAddr);
 }
 
 void loop()
 {
-  while (gpsSerial.available() > 0)
-    if (gps.encode(gpsSerial.read()))
-    {
-      displayInfo();
-      sprintf(payload, "*%s*%s#", str_lat, str_lon);
-    }
+  // while (gpsSerial.available() > 0)
+  //   if (gps.encode(gpsSerial.read()))
+  //   {
+  //     displayInfo();
+  //     sprintf(payload, "*%s*%s#", str_lat, str_lon);
+  //   }
 
-  if (millis() > 5000 && gps.charsProcessed() < 10)
-  {
-    Serial.println(F("No GPS detected: check wiring."));
-    while (true)
-      ;
-  }
-
-  // if (millis() - previousMillis > interval)
+  // if (millis() > 5000 && gps.charsProcessed() < 10)
   // {
-  //   previousMillis = millis();
-  //   sprintf(myStr, "*%d%d*%s*%s*%s*%s*%s*%s*%s*%s*%s*%s*%s*%d*%d*%d*%d#", 69696969, 217072470, "0.0000", "0.0000", "45.3880", "0.0000", "0.0000", "0.0009", "0.0000", "0.0000", "21.0000", "0.5270", "50.0050", 810, 36150, 6960, 43110);
-  //   Serial.print("Sending: ");
-  //   Serial.println(myStr);
-  //   lora.sendUplink(myStr, strlen(myStr), 0, 1);
-  //   // Serial.println("halo");
-
-  //   counter++;
+  //   Serial.println(F("No GPS detected: check wiring."));
+  //   while (true)
+  //     ;
   // }
 
-  // lora.update();
+  if (millis() - previousMillis > interval)
+  {
+    previousMillis = millis();
+    sprintf(myStr, "*%d%d*%s*%s*%s*%s*%s*%s*%s*%s*%s*%s*%s*%d*%d*%d*%d#", 15111111, 217072470, "0.0000", "0.0000", "45.3880", "0.0000", "0.0000", "0.0009", "0.0000", "0.0000", "21.0000", "0.5270", "50.0050", 810, 36150, 6960, 43110);
+    Serial.print("Sending: ");
+    Serial.println(myStr);
+    lora.sendUplink(myStr, strlen(myStr), 0, 1);
+    // Serial.println("halo");
+
+    counter++;
+  }
+
+  lora.update();
 }

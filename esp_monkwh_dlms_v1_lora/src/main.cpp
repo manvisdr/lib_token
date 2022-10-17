@@ -5,6 +5,9 @@
 #include <TimeAlarms.h>
 #include <SPI.h>
 #include <lorawan.h>
+#include <Preferences.h>
+
+Preferences preferences;
 
 struct dataMeter
 {
@@ -24,11 +27,13 @@ struct dataMeter
 dataMeter datameter;
 
 uint32_t unixTime;
+ulong deviceNumber;
 
 char buffData[255];
 
 #define csLora 5    // PIN CS LORA
 #define MODE_LORA 0 // LORA
+// #define US_915
 // DEF PIN
 #define RXD2 16         // PIN RX2
 #define TXD2 17         // PIN TX2
@@ -41,18 +46,19 @@ const sRFM_pins RFM_pins = {
     .DIO1 = 32,
 }; // DEF PIN LORA
 
-String customerID = "2000001";
+String customerID;
 String kwhID;
 const String channelId = "monKWH/";
-const char *devAddr = "260D6ECC";
-const char *nwkSKey = "1FD053B476BF4F732DC8CF5E565538B9";
-const char *appSKey = "2EE8E2940E6799AD78F9F4C6DA8C53D1";
+const char *devAddr = "01511111";
+const char *nwkSKey = "87A35777F816A6D00635D5BF11AC6E7D";
+const char *appSKey = "40195AAB5D7B2C0ABBA4D8B6BFC7BB5B";
 
 gxByteBuffer frameData;
 const uint32_t WAIT_TIME = 2000;
 const uint8_t RESEND_COUNT = 3;
 uint32_t runTime = 0;
 bool kwhReadReady = false;
+unsigned int fcnt;
 
 bool loraConf()
 {
@@ -63,6 +69,7 @@ bool loraConf()
   lora.setNwkSKey(nwkSKey);
   lora.setAppSKey(appSKey);
   lora.setDevAddr(devAddr);
+  lora.setFrameCounter(fcnt);
   return true;
 }
 
@@ -933,19 +940,19 @@ int com_readStaticOnce()
   cosem_init(BASE(clock1), DLMS_OBJECT_TYPE_CLOCK, "0.0.1.0.0.255");
   com_read(BASE(clock1), 3);
   com_read(BASE(clock1), 2);
-
   datameter.timeUnix = time_toUnixTime2(&clock1.time);
   obj_toString(BASE(clock1), &data);
-  GXTRACE(GET_STR_FROM_EEPROM("Clock"), data);
+  // GXTRACE(GET_STR_FROM_EEPROM("Clock"), data);
   Serial.println(datameter.timeUnix);
   obj_clear(BASE(clock1));
   free(data);
+  blinkProcces(1);
 
   gxData sn;
   cosem_init(BASE(sn), DLMS_OBJECT_TYPE_DATA, "0.0.96.1.1.255");
   com_read(BASE(sn), 2);
   obj_toString(BASE(sn), &data);
-  GXTRACE(GET_STR_FROM_EEPROM("Serial Number"), data);
+  // GXTRACE(GET_STR_FROM_EEPROM("Serial Number"), data);
   var_toString(&sn.value, &snBuff);
   char *pStr = bb_toString(&snBuff);
 
@@ -982,6 +989,7 @@ int com_readStaticOnce()
   free(data);
   Client.ReleaseObjects();
   com_close();
+  blinkProcces(1);
   return ret;
 }
 
@@ -995,6 +1003,7 @@ int com_readAllObjects() // const char *invocationCounter)
     GXTRACE_INT(GET_STR_FROM_EEPROM("com_initializeConnection failed"), ret);
     return ret;
   }
+  blinkProcces(3);
   GXTRACE_INT(GET_STR_FROM_EEPROM("com_initializeConnection SUCCEEDED"), ret);
   GXTRACE_INT(GET_STR_FROM_EEPROM("\n"), ret);
 
@@ -1006,104 +1015,113 @@ int com_readAllObjects() // const char *invocationCounter)
   com_read(BASE(volt), 3);
   com_read(BASE(volt), 2);
   obj_toString(BASE(volt), &data);
-  GXTRACE(GET_STR_FROM_EEPROM("volt >> "), data);
+  // GXTRACE(GET_STR_FROM_EEPROM("volt >> "), data);
   // Serial.println(var_toDouble(&volt.value) * pow(10, volt.scaler));
   datameter.volt = var_toDouble(&volt.value) * pow(10, volt.scaler);
-  Serial.println(datameter.volt);
+  Serial.printf("Volt : %.3f\n", datameter.volt);
   obj_clear(BASE(volt));
   free(data);
+  blinkProcces(1);
 
   gxRegister current;
   cosem_init(BASE(current), DLMS_OBJECT_TYPE_REGISTER, "1.0.31.7.0.255");
   com_read(BASE(current), 3);
   com_read(BASE(current), 2);
   obj_toString(BASE(current), &data);
-  GXTRACE(GET_STR_FROM_EEPROM("current >> "), data);
+  // GXTRACE(GET_STR_FROM_EEPROM("current >> "), data);
   // Serial.println(var_toDouble(&current.value) * pow(10, current.scaler));
   datameter.current = var_toDouble(&current.value) * pow(10, current.scaler);
-  Serial.println(datameter.current);
+  Serial.printf("Current : %.3f\n", datameter.current);
   obj_clear(BASE(current));
   free(data);
+  blinkProcces(1);
 
   gxRegister watt;
   cosem_init(BASE(watt), DLMS_OBJECT_TYPE_REGISTER, "1.0.21.7.0.255");
   com_read(BASE(watt), 3);
   com_read(BASE(watt), 2);
   obj_toString(BASE(watt), &data);
-  GXTRACE(GET_STR_FROM_EEPROM("watt >> "), data);
+  // GXTRACE(GET_STR_FROM_EEPROM("watt >> "), data);
   // Serial.println(var_toDouble(&watt.value) * pow(10, watt.scaler));
   datameter.watt = var_toDouble(&watt.value) * pow(10, watt.scaler);
-  Serial.println(datameter.watt);
+  Serial.printf("Watt : %.3f\n", datameter.watt);
   obj_clear(BASE(watt));
   free(data);
+  blinkProcces(1);
 
   gxRegister pF;
   cosem_init(BASE(pF), DLMS_OBJECT_TYPE_REGISTER, "1.0.33.7.0.255");
   com_read(BASE(pF), 3);
   com_read(BASE(pF), 2);
   obj_toString(BASE(pF), &data);
-  GXTRACE(GET_STR_FROM_EEPROM("pF >> "), data);
+  // GXTRACE(GET_STR_FROM_EEPROM("pF >> "), data);
   // Serial.println(var_toDouble(&pF.value) * pow(10, pF.scaler));
   datameter.pf = var_toDouble(&pF.value) * pow(10, pF.scaler);
-  Serial.println(datameter.pf);
+  Serial.printf("pF : %.3f\n", datameter.pf);
   obj_clear(BASE(pF));
   free(data);
+  blinkProcces(1);
 
   gxRegister freq;
   cosem_init(BASE(freq), DLMS_OBJECT_TYPE_REGISTER, "1.0.14.7.0.255");
   com_read(BASE(freq), 3);
   com_read(BASE(freq), 2);
   obj_toString(BASE(freq), &data);
-  GXTRACE(GET_STR_FROM_EEPROM("freq >> "), data);
+  // GXTRACE(GET_STR_FROM_EEPROM("freq >> "), data);
   // Serial.println(var_toDouble(&freq.value) * pow(10, freq.scaler));
   datameter.freq = var_toDouble(&freq.value) * pow(10, freq.scaler);
-  Serial.println(datameter.freq);
+  Serial.printf("Freq : %.3f\n", datameter.freq);
   obj_clear(BASE(freq));
   free(data);
+  blinkProcces(1);
 
   gxRegister kwh1;
   cosem_init(BASE(kwh1), DLMS_OBJECT_TYPE_REGISTER, "1.0.1.8.0.255");
   com_read(BASE(kwh1), 3);
   com_read(BASE(kwh1), 2);
   obj_toString(BASE(kwh1), &data);
-  GXTRACE(GET_STR_FROM_EEPROM("kwh1 >> "), data);
+  // GXTRACE(GET_STR_FROM_EEPROM("kwh1 >> "), data);
   datameter.kwh1 = var_toInteger(&kwh1.value);
-  Serial.println(datameter.kwh1);
+  Serial.printf("KWH1 : %d\n", datameter.kwh1);
   obj_clear(BASE(kwh1));
   free(data);
+  blinkProcces(1);
 
   gxRegister kwh2;
   cosem_init(BASE(kwh2), DLMS_OBJECT_TYPE_REGISTER, "1.0.2.8.0.255");
   com_read(BASE(kwh2), 3);
   com_read(BASE(kwh2), 2);
   obj_toString(BASE(kwh2), &data);
-  GXTRACE(GET_STR_FROM_EEPROM("kwh2 >> "), data);
+  // GXTRACE(GET_STR_FROM_EEPROM("kwh2 >> "), data);
   datameter.kwh2 = var_toInteger(&kwh2.value);
-  Serial.println(datameter.kwh2);
+  Serial.printf("KWH2 : %d\n", datameter.kwh2);
   obj_clear(BASE(kwh2));
   free(data);
+  blinkProcces(1);
 
   gxRegister kvar1;
   cosem_init(BASE(kvar1), DLMS_OBJECT_TYPE_REGISTER, "1.0.3.8.0.255");
   com_read(BASE(kvar1), 3);
   com_read(BASE(kvar1), 2);
   obj_toString(BASE(kvar1), &data);
-  GXTRACE(GET_STR_FROM_EEPROM("kvar1 >> "), data);
+  // GXTRACE(GET_STR_FROM_EEPROM("kvar1 >> "), data);
   datameter.kvar = var_toInteger(&kvar1.value);
-  Serial.println(datameter.kvar);
+  Serial.printf("KVAR1 : %d\n", datameter.kvar);
   obj_clear(BASE(kvar1));
   free(data);
+  blinkProcces(1);
 
   gxRegister kvar2;
   cosem_init(BASE(kvar2), DLMS_OBJECT_TYPE_REGISTER, "1.0.4.8.0.255");
   com_read(BASE(kvar2), 3);
   com_read(BASE(kvar2), 2);
   obj_toString(BASE(kvar2), &data);
-  GXTRACE(GET_STR_FROM_EEPROM("kvar2 >> "), data);
+  // GXTRACE(GET_STR_FROM_EEPROM("kvar2 >> "), data);
   datameter.kvar2 = var_toInteger(&kvar2.value);
-  Serial.println(datameter.kvar2);
+  Serial.printf("KVAR2 : %d\n", datameter.kvar2);
   obj_clear(BASE(kvar2));
   free(data);
+  blinkProcces(1);
 
   // Release dynamically allocated objects.
   Client.ReleaseObjects();
@@ -1113,7 +1131,6 @@ int com_readAllObjects() // const char *invocationCounter)
 
 void BackgroundDelay()
 {
-  blinkProcces(3);
   kwhReadReady = true;
   Serial.printf("TIME TO READ\n");
 }
@@ -1121,6 +1138,11 @@ void BackgroundDelay()
 void setup()
 {
   Serial.begin(115200);
+  pinMode(PIN_LED_WARN, OUTPUT);
+  pinMode(PIN_LED_PROC, OUTPUT);
+  preferences.begin("settings", false);
+  fcnt = preferences.getUInt("lora_fcnt", 0);
+  Serial.printf("Frame Counter: %d\n", fcnt);
   GXTRACE(GET_STR_FROM_EEPROM("Start application"), NULL);
   BYTE_BUFFER_INIT(&frameData);
   // Set frame capacity.
@@ -1149,21 +1171,24 @@ void setup()
   }
   else
     loraConf();
-  Serial2.begin(9600);
+  Serial2.begin(9600,SERIAL_8N1,RXD2,TXD2);
   com_readStaticOnce();
   setTime(datameter.timeUnix);
-  Alarm.timerRepeat(30, BackgroundDelay); // timer for every 15 seconds
+  Alarm.timerRepeat(60, BackgroundDelay); // timer for every 15 seconds
+  customerID = devAddr;
+  deviceNumber = strtoul(customerID.c_str(), NULL, 16);
 }
 
 void loop()
 {
+  // com_readStaticOnce();
   int ret_readAll;
   int ret_com;
   char bufferData[255];
   blinkWarning(1);
   if (kwhReadReady)
   {
-    blinkProcces(3);
+    blinkWarning(0);
     runTime = millis();
     GXTRACE(GET_STR_FROM_EEPROM("Start reading"), NULL);
     ret_readAll = com_readAllObjects();
@@ -1172,20 +1197,47 @@ void loop()
     Serial.printf("com_close() : %d\n", ret_com);
     if (ret_readAll == DLMS_ERROR_CODE_OK and ret_com == DLMS_ERROR_CODE_OK)
     {
-      sprintf(bufferData, "TimeUnix: %d\nSerial Number: %s\nVolt: %.3f\nCurrent: %.3f\nWatt; %.3f\npF: %.3f\nfreq: %.3f\nkvar1: %d\nkvar2: %d\nkwh1: %d\nkhw2: %d\n",
-              datameter.timeUnix,
+      // sprintf(bufferData, "TimeUnix: %d\nSerial Number: %s\nVolt: %.3f\nCurrent: %.3f\nWatt: %.3f\npF: %.3f\nfreq: %.2f\nkvar1: %d\nkvar2: %d\nkwh1: %d\nkhw2: %d\n",
+      //         datameter.timeUnix,
+      //         datameter.serialnumber,
+      //         datameter.volt,
+      //         datameter.current,
+      //         datameter.watt,
+      //         datameter.pf,
+      //         datameter.freq,
+      //         datameter.kvar,
+      //         datameter.kvar2,
+      //         datameter.kwh1,
+      //         datameter.kwh2);
+      // Serial.print(bufferData);
+      blinkProcces(5);
+      sprintf(bufferData, "~*%d*%d*%s*%.3f*%d*%d*%.3f*%d*%d*%.3f*%d*%d*%.3f*%.3f*%d*%d*%d*%d#",
+              1,
+              deviceNumber,
               datameter.serialnumber,
               datameter.volt,
+              -1,
+              -1,
               datameter.current,
+              -1,
+              -1,
               datameter.watt,
+              -1,
+              -1,
               datameter.pf,
               datameter.freq,
               datameter.kvar,
               datameter.kvar2,
               datameter.kwh1,
               datameter.kwh2);
-      Serial.print(bufferData);
+      Serial.println(bufferData);
+      lora.sendUplink(bufferData, strlen(bufferData), 1, 1);
+      lora.update();
+      preferences.putUInt("lora_fcnt", lora.getFrameCounter());
     }
+
+    fcnt = preferences.getUInt("lora_fcnt", 0);
+    Serial.printf("Frame Counter: %d\n", fcnt);
     kwhReadReady = false;
   }
   digitalClockDisplay();

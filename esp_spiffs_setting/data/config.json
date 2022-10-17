@@ -1,12 +1,21 @@
 {
   "device": {
     "id": 455544,
+    "type": "LORA",
+    "gpslat": -7.3439796,
+    "gpslong": 112.7522739,
+    "record": 60,
     "status": "running"
   },
   "meter": {
     "id": 2424242,
     "serialnum": 12414314,
-    "type": "MK10E"
+    "type": "MK10E",
+    "v_scale": 1,
+    "i_scale": 1,
+    "p_scale": 1,
+    "kvar_scale": 1,
+    "kwh_scale": 1
   },
   "lora": {
     "boolean": true,
