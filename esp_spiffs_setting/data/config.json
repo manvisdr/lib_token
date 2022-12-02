@@ -1,15 +1,16 @@
 {
   "device": {
-    "id": 455544,
+    "id": 22120001,
+    "serialnum": "MONKWH2P220V0001",
     "type": "LORA",
-    "gpslat": -7.3439796,
-    "gpslong": 112.7522739,
+    "firmwareversion": 1.1,
+    "gpslat": 0,
+    "gpslong": 0,
     "record": 60,
     "status": "running"
   },
   "meter": {
-    "id": 2424242,
-    "serialnum": 12414314,
+    "serialnum": "12414314",
     "type": "MK10E",
     "v_scale": 1,
     "i_scale": 1,
@@ -18,23 +19,23 @@
     "kwh_scale": 1
   },
   "lora": {
-    "boolean": true,
-    "devaddr": "260D6ECC",
+    "enable": true,
+    "devaddr": 1518641,
     "nwkskey": "1FD053B476BF4F732DC8CF5E565538B9",
     "appskey": "2EE8E2940E6799AD78F9F4C6DA8C53D1"
   },
   "mqtt": {
-    "boolean": true,
-    "server": 17435146,
+    "enable": false,
+    "server": 3418517742,
     "port": 1883,
-    "user": "mgiadmin",
-    "pass": "1234567890"
+    "user": "das",
+    "pass": "mgi2022"
   },
   "lan": {
-    "boolean": true,
-    "ip": 17435146,
-    "netmask": 17435146,
-    "gateway": 17435146,
-    "dns": 17435146
+    "enable": false,
+    "ip": 0,
+    "netmask": 0,
+    "gateway": 0,
+    "dns": 0
   }
 }

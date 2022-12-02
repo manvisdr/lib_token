@@ -1,0 +1,7 @@
+menu "UVC Stream"
+
+    config TRIGGER_PIN
+        bool "Enable Trigger Pin For Debug"
+        default false
+
+endmenu

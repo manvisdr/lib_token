@@ -1,0 +1,37 @@
+{
+	"folders": [
+		{
+			"name": "espcam_montok_v0.beta",
+			"path": "espcam_montok_v0.beta"
+		},
+		{
+			"name": "esp_montok_run",
+			"path": "esp_montok_run"
+		},
+		{
+			"name": "esp_monkwh_v1_lora",
+			"path": "esp_monkwh_v1_lora"
+		},
+		{
+			"name": "esp_monkwh_v1.1_lora",
+			"path": "esp_monkwh_v1.1_lora"
+		},
+		{
+			"name": "esp_spiffs_setting",
+			"path": "esp_spiffs_setting"
+		},
+		{
+			"name": "esp_monkwh_dlms_v1_lora",
+			"path": "esp_monkwh_dlms_v1_lora"
+		}
+	],
+	"settings": {
+		"files.associations": {
+			"app_wifi.h": "c",
+			"uvc_stream.h": "c",
+			"fstream": "cpp",
+			"sstream": "cpp"
+		},
+		"idf.gitPathWin": "C:\\Users\\ptmgi\\.espressif\\tools\\idf-git\\2.30.1\\cmd\\git.exe"
+	}
+}

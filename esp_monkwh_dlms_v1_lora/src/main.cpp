@@ -49,7 +49,8 @@ const sRFM_pins RFM_pins = {
 String customerID;
 String kwhID;
 const String channelId = "monKWH/";
-const char *devAddr = "01511111";
+const char *devAddr = "01511112";
+// const char *devAddr = "01511111"; monkwh mk7 legi
 const char *nwkSKey = "87A35777F816A6D00635D5BF11AC6E7D";
 const char *appSKey = "40195AAB5D7B2C0ABBA4D8B6BFC7BB5B";
 
@@ -1171,7 +1172,7 @@ void setup()
   }
   else
     loraConf();
-  Serial2.begin(9600,SERIAL_8N1,RXD2,TXD2);
+  Serial2.begin(9600, SERIAL_8N1, RXD2, TXD2);
   com_readStaticOnce();
   setTime(datameter.timeUnix);
   Alarm.timerRepeat(60, BackgroundDelay); // timer for every 15 seconds

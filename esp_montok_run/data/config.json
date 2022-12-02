@@ -1,0 +1,16 @@
+{
+  "device": {
+    "id": 22120001,
+    "serialnum": "TOKONL2P220V0001",
+    "firmwareversion": 1.0,
+    "status": "running"
+  },
+  "bluetooth": {
+    "name": "",
+    "uuid": 12414314
+  },
+  "wifi": {
+    "ssid": "",
+    "password": ""
+  }
+}

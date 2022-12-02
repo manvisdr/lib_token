@@ -37,9 +37,13 @@ String customerID = "54565456";
 String kwhID;
 String kwhType = "MK10E";
 const String channelId = "monKWH/";
-const char *devAddr = "260D6ECC";
-const char *nwkSKey = "1FD053B476BF4F732DC8CF5E565538B9";
-const char *appSKey = "2EE8E2940E6799AD78F9F4C6DA8C53D1";
+// kwh legi bni
+// const char *devAddr = "260D6ECC";
+// const char *nwkSKey = "1FD053B476BF4F732DC8CF5E565538B9";
+// const char *appSKey = "2EE8E2940E6799AD78F9F4C6DA8C53D1";
+const char *devAddr = "260d44c2";
+const char *nwkSKey = "927b1ef8e776a54185c1a51fdd43dfcb";
+const char *appSKey = "aff8978601d9c13c3fb153c5ef2df551";
 const unsigned int interval = 5000;
 const unsigned int interval_cek_konek = 2000;
 const unsigned int interval_record = 20000;
@@ -195,9 +199,9 @@ void loop()
             3,
             customerID,
             kwhID,
-            String(edmiread.voltR()*1000, 4).c_str(),
-            String(edmiread.voltS()*1000, 4).c_str(),
-            String(edmiread.voltT()*1000, 4).c_str(),
+            String(edmiread.voltR() * 1000, 4).c_str(),
+            String(edmiread.voltS() * 1000, 4).c_str(),
+            String(edmiread.voltT() * 1000, 4).c_str(),
             String(edmiread.currentR(), 4).c_str(),
             String(edmiread.currentS(), 4).c_str(),
             String(edmiread.currentT(), 4).c_str(),
