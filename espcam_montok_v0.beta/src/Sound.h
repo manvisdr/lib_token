@@ -22,3 +22,7 @@ bool detectFrequency(unsigned int *mem, unsigned int minMatch, double peak, unsi
 void calculateMetrics(int val);
 
 void SoundLooping();
+
+bool SoundDetectLong();
+
+bool SoundDetectShort();

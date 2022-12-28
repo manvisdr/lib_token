@@ -1,4 +1,4 @@
-#include <montok.h>
+#include <tokenonline.h>
 
 // CAMERA INIT CONFIG
 void CameraInit()
@@ -46,17 +46,22 @@ void CameraInit()
   }
   else
     Serial.printf("CameraInit()...Succesfull\n", err);
-}
 
-void CameraCapture()
-{
-  camera_fb_t *fb = NULL;
-  fb = esp_camera_fb_get();
-  if (!fb)
+  sensor_t *s = esp_camera_sensor_get();
+  ov5640.start(s);
+  if (s->id.PID == OV5640_PID)
   {
-    Serial.println("Camera capture failed");
-    delay(1000);
-    ESP.restart();
+    s->set_vflip(s, 1);
+    s->set_brightness(s, -2);
   }
-  esp_camera_fb_return(fb);
+
+  if (ov5640.focusInit() == 0)
+  {
+    Serial.println("OV5640_Focus_Init Successful!");
+  }
+
+  if (ov5640.autoFocusMode() == 0)
+  {
+    Serial.println("OV5640_Auto_Focus Successful!");
+  }
 }

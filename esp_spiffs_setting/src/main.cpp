@@ -367,7 +367,6 @@ SettingsManager settings;
 IPAddress ipNew;
 const char *configFile = "/config.json";
 
-int devId;
 char devSerNum[20];
 char devType[5];
 float devFirmVer;
@@ -376,8 +375,7 @@ float GpsLat;
 float GpsLong;
 char devStatus[10];
 
-char meterSernum[20];
-char meterSerNum[15];
+char meterSernum[25];
 char meterType[5];
 int meterV_scale;
 int meterI_scale;
@@ -385,9 +383,11 @@ int meterP_scale;
 int meterKvar_scale;
 int meterKwh_scale;
 
-int devAddr;
-char nwkSKey[33];
-char appSKey[33];
+bool loraEnable;
+int loraDevAddr;
+char loraNwkSKey[33];
+char loraAppSKey[33];
+bool debugBool = false;
 
 void getTests()
 {
@@ -432,7 +432,6 @@ bool SettingsInit()
 {
   settings.readSettings(configFile);
 
-  devId = settings.getInt("device.id");
   strcpy(devSerNum, settings.getChar("device.serialnum"));
   strcpy(devType, settings.getChar("device.type"));
   devFirmVer = settings.getFloat("device.firmwareversion");
@@ -442,6 +441,7 @@ bool SettingsInit()
   strcpy(devStatus, settings.getChar("device.status"));
   devRecord = settings.getInt("device.record");
 
+  strcpy(meterSernum, settings.getChar("meter.sernum"));
   strcpy(meterType, settings.getChar("meter.type"));
   meterV_scale = settings.getInt("meter.v_scale");
   meterI_scale = settings.getInt("meter.i_scale");
@@ -449,11 +449,11 @@ bool SettingsInit()
   meterKvar_scale = settings.getInt("meter.kvar_scale");
   meterKwh_scale = settings.getInt("meter.kwh_scale");
 
-  devAddr = settings.getInt("lora.devaddr");
-  strcpy(nwkSKey, settings.getChar("lora.nwkskey"));
-  strcpy(appSKey, settings.getChar("lora.appskey"));
+  loraEnable = settings.getBool("lora.enable");
+  loraDevAddr = settings.getInt("lora.devaddr");
+  strcpy(loraNwkSKey, settings.getChar("lora.nwkskey"));
+  strcpy(loraAppSKey, settings.getChar("lora.appskey"));
 
-  Serial.println("Device ID : " + String(devId)); //"id":455544
   Serial.println("Device ID : " + String(devSerNum));
   Serial.println("Device ID : " + String(devType));
   Serial.println("Device ID : " + String(devFirmVer));
@@ -470,9 +470,10 @@ bool SettingsInit()
   Serial.println("Meter kvar_scale : " + String(meterKvar_scale)); //   "kvar_scale": 1,
   Serial.println("Meter kwh_scale : " + String(meterKwh_scale));   //   "kwh_scale": 1
 
-  Serial.println("Lora devaddr : " + String(devAddr)); //   "devaddr": "260D6ECC",
-  Serial.println("Lora nwkskey : " + String(nwkSKey)); //   "nwkskey": "1FD053B476BF4F732DC8CF5E565538B9",
-  Serial.println("Lora appskey : " + String(appSKey)); //   "appskey": "2EE8E2940E6799AD78F9F4C6DA8C53D1"
+  Serial.println("Lora enable : " + String(loraEnable));
+  Serial.println("Lora devaddr : " + String(loraDevAddr)); //   "devaddr": "260D6ECC",
+  Serial.println("Lora nwkskey : " + String(loraNwkSKey)); //   "nwkskey": "1FD053B476BF4F732DC8CF5E565538B9",
+  Serial.println("Lora appskey : " + String(loraAppSKey)); //   "appskey": "2EE8E2940E6799AD78F9F4C6DA8C53D1"
 
   return true;
 }
@@ -515,8 +516,14 @@ void SerialSettingReadAll()
 {
   // Serial.printf("<I|%d|%s|%s|%.1f|%.1f|%.1f|%s|%s| ",
   // devId, devSerNum, devType, devFirmVer, GpsLat, GpsLong, devRecord, devStatus);
-  Serial.printf("<I|%d|%s|%s|%.1f|%.1f|%.1f|%d|%s| ",
-                devId, devSerNum, devType, devFirmVer, GpsLat, GpsLong, devRecord, devStatus);
+  Serial.printf("<I|%s|%s|%.1f|%s|%.1f|%.1f| ",
+                devSerNum, devType, devFirmVer, devStatus, GpsLat, GpsLong);
+  Serial.printf("K|%s|%s|%d|%d|%d|%d|%d|%d|%d|%d| ",
+                meterSernum, meterType, devRecord, meterV_scale, meterI_scale, meterP_scale,
+                meterKvar_scale, meterKvar_scale, meterKwh_scale, meterKwh_scale);
+  Serial.printf("L|%d|%d|%s|%s|>" /* >" */, loraEnable, loraDevAddr, loraNwkSKey, loraAppSKey);
+  // Serial.printf("M|%d|%d|%d|%s|%s| ", mqttconf.enable, mqttconf.server, mqttconf.port, mqttconf.user, mqttconf.pass);
+  // Serial.printf("E|%d|%d|%d|%d|%d| >", lanconf.enable, lanconf.ip, lanconf.netmask, lanconf.gateway, lanconf.dns);
 }
 
 void LED_off()
@@ -555,13 +562,30 @@ void process_command()
   }
 }
 
+void DebugOn()
+{
+  debugBool = true;
+  while (debugBool)
+  {
+    Serial.println("<5|*1*414535*12.53535*343342#|>");
+    delay(1000);
+  }
+}
+
+void DebugOff()
+{
+  debugBool = false;
+}
+
 void setup()
 {
   Serial.begin(115200);
-  SCmd.addCommand("<ALL>", SerialSettingReadAll); // Turns LED on
-  SCmd.addCommand("<LORA>", LED_off);             // Turns LED off
-  SCmd.addCommand("<P>", process_command);        // Converts two arguments to integers and echos them back
+  SCmd.addCommand("<RALL>", SerialSettingReadAll); // Turns LED on
+  SCmd.addCommand("<LORA>", LED_off);              // Turns LED off
+  SCmd.addCommand("<P>", process_command);         // Converts two arguments to integers and echos them back
   // SCmd.addDefaultHandler(unrecognized);  // Handler for command that isn't matched  (says "What?")
+  SCmd.addCommand("<DBUGON>", DebugOn);
+  SCmd.addCommand("<DBUGOFF>", DebugOff);
   Serial.println("Ready");
 
   char version[55] = {0};

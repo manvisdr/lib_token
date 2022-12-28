@@ -1,4 +1,4 @@
-#include <montok.h>
+#include <tokenonline.h>
 
 #define SAMPLES 1024
 const i2s_port_t I2S_PORT = I2S_NUM_1;
@@ -23,10 +23,14 @@ static unsigned int mx = 0;
 static unsigned int cnts = 0;
 static unsigned long lastTrigger[2] = {0, 0};
 
+int cnt = 0;
+unsigned int SoundPeak;
+
 boolean detectShort = false;
 boolean detectLong = false;
-
-int cnt = 0;
+int detectLongCnt;
+int detectShortCnt;
+int cntDetected;
 
 void SoundInit()
 {
@@ -66,7 +70,7 @@ void SoundInit()
     while (true)
       ;
   }
-  Serial.println("I2S driver installed.");
+  Serial.println("SoundInit()...Successful!");
 }
 
 static void integerToFloat(int32_t *integer, float *vReal, float *vImag, uint16_t samples)
@@ -181,10 +185,85 @@ void SoundLooping()
   sumEnergy(real, energy, 1, OCTAVES);
   // calculate loudness per octave + A weighted loudness
   float loudness = calculateLoudness(energy, aweighting, OCTAVES, 1.0);
-  unsigned int peak = (int)floor(fft.MajorPeak());
-  // Serial.println(peak);
-  // Serial.printf("%d %d %d %d %d\n", peak, detectPrint, detectCnt, detectedLong, detectedShort);
+  // unsigned int peak = (int)floor(fft.MajorPeak());
 
-  detectLong = detectFrequency(&bell, 22, peak, 117, 243, true);
-  detectShort = detectFrequency(&bell, 2, peak, 117, 243, true);
+  SoundPeak = (int)floor(fft.MajorPeak());
+  // detectLong = detectFrequency(&bell, 22, peak, 117, 243, true);
+  // detectShort = detectFrequency(&bell, 2, peak, 117, 243, true);
+}
+
+bool SoundDetectLong()
+{
+  SoundLooping();
+  bool detectedLong = detectFrequency(&bell, 22, SoundPeak, 117, 243, true);
+  bool detectedShort = detectFrequency(&bell, 2, SoundPeak, 117, 243, true);
+
+  // Serial.printf("%d %d %d %d %d\n", SoundPeak, detectedLong, detectedShort, detectLongCnt, detectShortCnt);
+  if (!detectedShort and (detectShortCnt > 35) or detectedLong)
+  {
+    Serial.println("DETECTED LONG BEEP BEEP");
+    cntDetected = 0;
+    detectShortCnt = 0;
+    detectLongCnt = 0;
+    return true;
+  }
+  else
+  {
+    if (detectedLong)
+    {
+      cntDetected++;
+      detectLongCnt++;
+    }
+    // Serial.println("DETEK LONG BEEP");
+    else if (detectedShort) // and !detectLong)
+    {
+      cntDetected++;
+      detectShortCnt++;
+    }
+    else
+    {
+      cntDetected = 0;
+      detectShortCnt = 0;
+      detectLongCnt = 0;
+    }
+    return false;
+  }
+}
+
+bool SoundDetectShort()
+{
+  SoundLooping();
+  bool detectedLong = detectFrequency(&bell, 22, SoundPeak, 117, 243, true);
+  bool detectedShort = detectFrequency(&bell, 2, SoundPeak, 117, 243, true);
+
+  // Serial.printf("%d %d %d %d %d\n", SoundPeak, detectedLong, detectedShort, detectLongCnt, detectShortCnt);
+  if (!detectedShort and (detectShortCnt > 1 and detectShortCnt < 35))
+  {
+    Serial.println("DETECTED SHORT BEEP");
+    cntDetected = 0;
+    detectShortCnt = 0;
+    detectLongCnt = 0;
+    return true;
+  }
+  else
+  {
+    if (detectedLong)
+    {
+      cntDetected++;
+      detectLongCnt++;
+    }
+    // Serial.println("DETEK LONG BEEP");
+    else if (detectedShort) // and !detectLong)
+    {
+      cntDetected++;
+      detectShortCnt++;
+    }
+    else
+    {
+      cntDetected = 0;
+      detectShortCnt = 0;
+      detectLongCnt = 0;
+    }
+    return false;
+  }
 }

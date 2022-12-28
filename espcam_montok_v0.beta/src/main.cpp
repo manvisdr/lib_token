@@ -1,111 +1,78 @@
-#include <montok.h>
+#include <tokenonline.h>
 
+WebServer OTASERVER(80);
+SettingsManager settings;
 Adafruit_MCP23017 mcp;
 HTTPClient httpClient;
 WiFiClient WifiEspClient;
-PubSubClient Mqtt(WifiEspClient);
+PubSubClient mqtt(WifiEspClient);
 Preferences preferences;
 BluetoothSerial SerialBT;
+OV5640 ov5640 = OV5640();
+IPAddress mqttServer(203, 194, 112, 238);
+AlarmId pingTime;
+AlarmId pingTimeSend;
+Timeout timerSolenoid;
 
-const char *remote_host = "www.google.com";
-const int ledPin = 12;
-const int modeAddr = 0;
-const int wifiAddr = 10;
-String idDevice = "20221122";
+char idDevice[10];
+char bluetooth_name[20];
+enum ENUM_KONEKSI KoneksiStage = NONE;
+Status DebugStatus;
 
-String receivedData;
+char topicREQToken[50];
+char topicRSPToken[50];
+char topicREQView[50];
+char topicRSPView[50];
+char topicRSPSignal[50];
+char topicRSPStatus[50];
+char wifissidbuff[20];
+char wifipassbuff[20];
 
-String wifiName;
-String wifiPassword;
-const char *post_url = "http://203.194.112.238:8081/montok/log"; // Location where images are POSTED
-bool internet_connected = false;
-
-bool wifiConnected = false;
-
-int cnt_wifi_timeout = 0;
-int modeIdx;
-
-String network_string;
-String connected_string;
-String client_wifi_ssid;
-String client_wifi_password;
-enum wifi_setup_stages wifi_stage = NONE;
-bool bluetooth_disconnect = false;
+char received_topic[128];
+char received_payload[128];
+unsigned int received_length;
+bool received_msg = false;
 
 void setup()
 {
-  cnt_wifi_timeout = 0;
-  // put your setup code here, to run once:
   Serial.begin(115200);
-  pinMode(ledPin, OUTPUT);
+  pinMode(33, OUTPUT);
+  digitalWrite(33, HIGH);
 
-  if (!EEPROM.begin(EEPROM_SIZE))
-  {
-    delay(1000);
-  }
-
-  CameraInit();
-  SoundInit();
-  MechanicInit();
+  SettingsInit();
   KoneksiInit();
 
-  MqttConnect();
+  WifiInit();
+  CameraInit();
+  SoundInit();
+  ProccessInit();
+  MqttInit();
 
-  // wifiStartTask();
-  // bleTask();
-  MqttPublish("203214223123144242");
-  Mqtt.subscribe("monTok");
+  MechanicInit();
+
+  digitalWrite(33, LOW);
+  delay(300);
+  digitalWrite(33, HIGH);
+  delay(300);
+  digitalWrite(33, LOW);
+
+  // for (int a = 0; a < 20; a++)
+  // {
+  //   MechanicTyping(dummyToken[a]);
+  // }
 }
 
 void loop()
 {
-  Mqtt.loop();
-  // if (bluetooth_disconnect)
-  // {
-  //   disconnect_bluetooth();
-  // }
-
-  switch (wifi_stage)
+  if (!mqtt.connected())
   {
-  case SCAN_START:
-    SerialBT.println("Scanning Wi-Fi networks");
-    Serial.println("Scanning Wi-Fi networks");
-    scan_wifi_networks();
-    SerialBT.println("Please enter the number for your Wi-Fi");
-    wifi_stage = SCAN_COMPLETE;
-    break;
-
-  case SSID_ENTERED:
-    SerialBT.println("Please enter your Wi-Fi password");
-    Serial.println("Please enter your Wi-Fi password");
-    wifi_stage = WAIT_PASS;
-    break;
-
-  case PASS_ENTERED:
-    SerialBT.println("Please wait for Wi-Fi connection...");
-    Serial.println("Please wait for Wi_Fi connection...");
-    wifi_stage = WAIT_CONNECT;
-    preferences.putString("pref_ssid", client_wifi_ssid);
-    preferences.putString("pref_pass", client_wifi_password);
-    if (init_wifi())
-    { // Connected to WiFi
-      connected_string = "ESP32 IP: ";
-      connected_string = connected_string + WiFi.localIP().toString();
-      SerialBT.println(connected_string);
-      Serial.println(connected_string);
-      // bluetooth_disconnect = true;
-    }
-    else
-    { // try again
-      wifi_stage = LOGIN_FAILED;
-    }
-    break;
-
-  case LOGIN_FAILED:
-    SerialBT.println("Wi-Fi connection failed");
-    Serial.println("Wi-Fi connection failed");
-    delay(2000);
-    wifi_stage = SCAN_START;
-    break;
+    MqttReconnect();
   }
+  mqtt.loop();
+
+  TokenProcess();
+  GetKwhProcess();
+  DetecLowToken();
+
+  OTASERVER.handleClient();
 }

@@ -1,44 +1,71 @@
-#include <montok.h>
-
-String ssids_array[50];
-
-const char *pref_ssid = "";
-const char *pref_pass = "";
-
-const char *bluetooth_name = "MonTok";
+#include <tokenonline.h>
 
 long start_wifi_millis;
 long wifi_timeout = 10000;
+int cntLoss;
+char *sPtr[20];
+char *strData = NULL; // this is allocated in separate and needs to be free( ) eventually
 
+void BluetoothCallback();
 void KoneksiInit()
 {
-  preferences.begin("wifi_access", false);
-  if (!init_wifi())
-  { // Connect to Wi-Fi fails
-    SerialBT.register_callback(callback);
-  }
-  else
-  {
-    SerialBT.register_callback(callback_show_ip);
-  }
-
   SerialBT.begin(bluetooth_name);
+  SerialBT.register_callback(BluetoothCallback);
+
+  // xTaskCreatePinnedToCore(
+  //     CheckPingBackground,
+  //     "pingServer",     // Task name
+  //     5000,             // Stack size (bytes)
+  //     NULL,             // Parameter
+  //     tskIDLE_PRIORITY, // Task priority
+  //     NULL,             // Task handle
+  //     0);
 }
 
-bool init_wifi()
+void BluetoothCallback(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)
 {
-  String temp_pref_ssid = preferences.getString("pref_ssid");
-  String temp_pref_pass = preferences.getString("pref_pass");
-  pref_ssid = temp_pref_ssid.c_str();
-  pref_pass = temp_pref_pass.c_str();
+  char serialBTBuffer[50];
 
-  Serial.println(pref_ssid);
-  Serial.println(pref_pass);
+  if (event == ESP_SPP_SRV_OPEN_EVT)
+  {
+    Serial.println("BT Client Connected");
+    KoneksiStage = BT_INIT;
+  }
 
-  WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE);
+  if (event == ESP_SPP_DATA_IND_EVT and KoneksiStage == BT_INIT)
+  {
+    int N = WiFiFormParsing(SerialBT.readString(), sPtr, 20, &strData);
+    if (N == 2)
+    {
+      strcpy(wifissidbuff, sPtr[0]);
+      strcpy(wifipassbuff, sPtr[1]);
+      // }
+      Serial.println(wifissidbuff);
+      Serial.println(wifipassbuff);
+      SettingsWifiSave(wifissidbuff, wifipassbuff);
+      ESP.restart();
+    }
 
-  start_wifi_millis = millis();
-  WiFi.begin(pref_ssid, pref_pass);
+    // if (event == ESP_SPP_DATA_IND_EVT and KoneksiStage == BT_INIT)
+    // {
+    //   strcpy(serialBTBuffer, SerialBT.readString().c_str());
+    //   if (WiFIQRCheck(serialBTBuffer))
+    //   {
+    //     WiFiQRParsing(serialBTBuffer, &wifissidbuff, &wifipassbuff);
+    //     Serial.println(wifissidbuff);
+    //     Serial.println(wifipassbuff);
+    //   }
+    //   else
+    //     Serial.println("NOT WIFI QR");
+    // }
+  }
+}
+void WifiInit()
+{
+  if (strcmp(wifipassbuff, "NULL") == 0)
+    WiFi.begin(wifissidbuff, NULL);
+  else
+    WiFi.begin(wifissidbuff, wifipassbuff);
   while (WiFi.status() != WL_CONNECTED)
   {
     delay(500);
@@ -46,88 +73,96 @@ bool init_wifi()
     if (millis() - start_wifi_millis > wifi_timeout)
     {
       WiFi.disconnect(true, true);
-      return false;
     }
   }
-  return true;
+  Serial.println("WifiInit()...Successfull");
+  Serial.print("WiFi connected to");
+  Serial.print(wifissidbuff);
+  Serial.print(" IP: ");
+  Serial.println(WiFi.localIP());
+
+  OTASERVER.on("/", []()
+               { OTASERVER.send(200, "text/plain", "Hi! I am ESP8266."); });
+
+  ElegantOTA.begin(&OTASERVER); // Start ElegantOTA
+  OTASERVER.begin();
 }
 
-void scan_wifi_networks()
+char *extract_between(const char *str, const char *p1, const char *p2)
 {
-  WiFi.mode(WIFI_STA);
-  // WiFi.scanNetworks will return the number of networks found
-  int n = WiFi.scanNetworks();
-  if (n == 0)
+  const char *i1 = strstr(str, p1);
+  if (i1 != NULL)
   {
-    SerialBT.println("no networks found");
+    const size_t pl1 = strlen(p1);
+    const char *i2 = strstr(i1 + pl1, p2);
+    if (p2 != NULL)
+    {
+      /* Found both markers, extract text. */
+      const size_t mlen = i2 - (i1 + pl1);
+      char *ret = (char *)malloc(mlen + 1);
+      if (ret != NULL)
+      {
+        memcpy(ret, i1 + pl1, mlen);
+        ret[mlen] = '\0';
+        return ret;
+      }
+    }
   }
+}
+
+void WiFiQRParsing(const char *input, char **destSSID, char **destPASS)
+{
+  char *s;
+  s = strstr(input, ";T:"); // search for string "hassasin" in buff
+  if (s != NULL)            // if successful then s now points at "hassasin"
+  {
+    *destSSID = extract_between(input, "WIFI:S:", ";T:");
+    if (strcmp(extract_between(input, ";T:", ";P:"), "nopass") == 0)
+    {
+      *destPASS = NULL;
+    }
+    else
+      *destPASS = extract_between(input, ";P:", ";H:");
+  } // index of "hassasin" in buff can be found by pointer subtraction
   else
   {
-    SerialBT.println();
-    SerialBT.print(n);
-    SerialBT.println(" networks found");
-    delay(1000);
-    for (int i = 0; i < n; ++i)
-    {
-      ssids_array[i + 1] = WiFi.SSID(i);
-      Serial.print(i + 1);
-      Serial.print(": ");
-      Serial.println(ssids_array[i + 1]);
-      network_string = i + 1;
-      network_string = network_string + ": " + WiFi.SSID(i) + " (Strength:" + WiFi.RSSI(i) + ")";
-      SerialBT.println(network_string);
-    }
-    wifi_stage = SCAN_COMPLETE;
+    *destSSID = extract_between(input, "WIFI:S:", ";;");
+    *destPASS = NULL;
   }
 }
 
-void callback(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)
+bool WiFIQRCheck(const char *input)
 {
+  char *s;
+  s = strstr(input, "WIFI:"); // search for string "hassasin" in buff
+  if (s != NULL)              // if successful then s now points at "hassasin"
+    return true;
+  else
+    return false;
+}
 
-  if (event == ESP_SPP_SRV_OPEN_EVT)
+int WiFiFormParsing(String str, // pass as a reference to avoid double memory usage
+                    char **p, int size, char **pdata)
+{
+  int n = 0;
+  free(*pdata); // clean up last data as we are reusing sPtr[ ]
+  // BE CAREFUL not to free it twice
+  // calling free on NULL is OK
+  *pdata = strdup(str.c_str()); // allocate new memory for the result.
+  if (*pdata == NULL)
   {
-    Serial.println("BT Client Connected");
-    // wifi_stage = SCAN_START;
+    Serial.println("OUT OF MEMORY");
+    return 0;
   }
-
-  if (event == ESP_SPP_DATA_IND_EVT && wifi_stage == NONE)
-  { // data from phone is SSID
-    int client_state = SerialBT.readString().toInt();
-    switch (client_state)
+  *p++ = strtok(*pdata, ";");
+  for (n = 1; NULL != (*p++ = strtok(NULL, ";")); n++)
+  {
+    if (size == n)
     {
-    case SCAN:
-      wifi_stage = SCAN_START;
-      break;
-
-    default:
-      wifi_stage = NONE;
       break;
     }
   }
-
-  if (event == ESP_SPP_DATA_IND_EVT && wifi_stage == SCAN_COMPLETE)
-  { // data from phone is SSID
-    int client_wifi_ssid_id = SerialBT.readString().toInt();
-    client_wifi_ssid = ssids_array[client_wifi_ssid_id];
-    wifi_stage = SSID_ENTERED;
-  }
-
-  if (event == ESP_SPP_DATA_IND_EVT && wifi_stage == WAIT_PASS)
-  { // data from phone is password
-    client_wifi_password = SerialBT.readString();
-    client_wifi_password.trim();
-    wifi_stage = PASS_ENTERED;
-  }
-}
-
-void callback_show_ip(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)
-{
-  if (event == ESP_SPP_SRV_OPEN_EVT)
-  {
-    SerialBT.print("ESP32 IP: ");
-    SerialBT.println(WiFi.localIP());
-    bluetooth_disconnect = true;
-  }
+  return n;
 }
 
 void disconnect_bluetooth()
@@ -142,4 +177,71 @@ void disconnect_bluetooth()
   Serial.println("BT stopped");
   delay(1000);
   bluetooth_disconnect = false;
+}
+
+int CheckPingGateway()
+{
+  int pingReturn;
+  if (WiFi.status() == WL_CONNECTED)
+  {
+    if (Ping.ping(WiFi.localIP()))
+      cntLoss = 0;
+    else
+      cntLoss++;
+  }
+  if (cntLoss > 7)
+    pingReturn = 0;
+  else if (cntLoss = 0)
+    pingReturn = 100;
+  else
+    pingReturn = 50;
+  return cntLoss;
+}
+
+void CheckPingServer()
+{
+  int pingReturn;
+  if (WiFi.status() == WL_CONNECTED)
+  {
+    if (Ping.ping(mqttServer), 2)
+      cntLoss = 0;
+    else
+      cntLoss++;
+  }
+  Serial.printf("CheckPingServer() : cntLoss=%d\n", cntLoss);
+}
+
+void CheckPingBackground(void *parameter)
+{
+  pingTime = Alarm.timerRepeat(10, CheckPingServer);
+  pingTimeSend = Alarm.timerRepeat(30, CheckPingSend);
+  for (;;)
+  {
+    // Serial.print("Main Ping: Executing on core ");
+    // Serial.println(xPortGetCoreID());
+    Alarm.delay(1000);
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
+  }
+}
+
+void CheckPingSend()
+{
+  if (cntLoss == 3)
+  {
+    MqttCustomPublish(topicRSPSignal, "1");
+    Serial.println(F("CheckPingSend() : MqttCustomPublish: 1"));
+    cntLoss = 0;
+  }
+  else if (cntLoss == 2)
+  {
+    MqttCustomPublish(topicRSPSignal, "2");
+    Serial.println(F("CheckPingSend() : MqttCustomPublish: 2"));
+    cntLoss = 0;
+  }
+  else if (cntLoss <= 1)
+  {
+    MqttCustomPublish(topicRSPSignal, "3");
+    Serial.println(F("CheckPingSend() : MqttCustomPublish: 3"));
+    cntLoss = 0;
+  }
 }

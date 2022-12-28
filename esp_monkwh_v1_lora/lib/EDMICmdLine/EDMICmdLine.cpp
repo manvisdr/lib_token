@@ -579,10 +579,15 @@ void EdmiCMDReader::read_time()
     else if (charData[0] == R_FUNC and charData[1] == register_time[0] and charData[2] == register_time[1])
     {
       timeEdmi.hour = charData[6];
+      // Serial.println(timeEdmi.hour);
       timeEdmi.minute = charData[7];
+      // Serial.println(timeEdmi.minute);
       timeEdmi.seconds = charData[8];
+      // Serial.println(timeEdmi.seconds);
       timeEdmi.day = charData[3];
+      // Serial.println(timeEdmi.day);
       timeEdmi.month = charData[4];
+      // Serial.println(timeEdmi.year);
       timeEdmi.year = charData[5];
     }
   }

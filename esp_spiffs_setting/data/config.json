@@ -1,6 +1,5 @@
 {
   "device": {
-    "id": 22120001,
     "serialnum": "MONKWH2P220V0001",
     "type": "LORA",
     "firmwareversion": 1.1,
@@ -20,7 +19,7 @@
   },
   "lora": {
     "enable": true,
-    "devaddr": 1518641,
+    "devaddr": 15186411,
     "nwkskey": "1FD053B476BF4F732DC8CF5E565538B9",
     "appskey": "2EE8E2940E6799AD78F9F4C6DA8C53D1"
   },
