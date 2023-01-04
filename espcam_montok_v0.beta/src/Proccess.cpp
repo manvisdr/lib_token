@@ -60,7 +60,7 @@ bool DetecLowToken()
     detect = false;
   }
 
-  if (/* timer.time_over()  and */ counterLowSaldo > 13)
+  if (/* timer.time_over()  and */ counterLowSaldo > 30)
   {
     Serial.println("DETECK LOW TOKEN");
     Serial.println("SEND NOTIFICATION");
@@ -98,60 +98,60 @@ void TokenProcess(/*char *token*/)
       case '0':
 
         MqttPublishStatus("SELENOID " + String(chars) + " ON");
-        MechanicTyping(10);
+        // MechanicTyping(10);
         delay(1000);
         break;
 
       case '1':
 
         MqttPublishStatus("SELENOID " + String(chars) + " ON");
-        MechanicTyping(0);
+        // MechanicTyping(0);
         delay(1000);
         break;
 
       case '2':
 
         MqttPublishStatus("SELENOID " + String(chars) + " ON");
-        MechanicTyping(1);
+        ////MechanicTyping(1);
         delay(1000);
         break;
       case '3':
 
         MqttPublishStatus("SELENOID " + String(chars) + " ON");
-        MechanicTyping(2);
+        // MechanicTyping(2);
         delay(1000);
         break;
       case '4':
 
         MqttPublishStatus("SELENOID " + String(chars) + " ON");
-        MechanicTyping(3);
+        // MechanicTyping(3);
         delay(1000);
         break;
       case '5':
 
         MqttPublishStatus("SELENOID " + String(chars) + " ON");
-        MechanicTyping(4);
+        // MechanicTyping(4);
         delay(1000);
         break;
       case '6':
 
         MqttPublishStatus("SELENOID " + String(chars) + " ON");
-        MechanicTyping(5);
+        // MechanicTyping(5);
         delay(1000);
         break;
       case '7':
         MqttPublishStatus("SELENOID " + String(chars) + " ON");
-        MechanicTyping(6);
+        // MechanicTyping(6);
         delay(1000);
         break;
       case '8':
         MqttPublishStatus("SELENOID " + String(chars) + " ON");
-        MechanicTyping(7);
+        // MechanicTyping(7);
         delay(1000);
         break;
       case '9':
         MqttPublishStatus("SELENOID " + String(chars) + " ON");
-        MechanicTyping(8);
+        // MechanicTyping(8);
         delay(1000);
         break;
       default:
@@ -159,7 +159,7 @@ void TokenProcess(/*char *token*/)
       }
     }
 
-    MechanicEnter();
+    // MechanicEnter();
 
     ProccessSendSaldo(received_payload);
 
@@ -219,7 +219,7 @@ void ProccessSendNominal(char *status)
     ESP.restart();
   }
 
-  MqttPublishStatus("SEND IMAGE NOMINAL");
+  // MqttPublishStatus("SEND IMAGE NOMINAL");
   // res = sendImageNominal("success", "/dummy.jpg"); //dummy
   String res = sendImageNominal(status, fb->buf, fb->len);
   Serial.println(res);

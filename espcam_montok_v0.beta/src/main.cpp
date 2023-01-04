@@ -37,16 +37,16 @@ void setup()
 {
   Serial.begin(115200);
   pinMode(33, OUTPUT);
-  digitalWrite(33, HIGH);
+  digitalWrite(33, LOW);
 
-  SettingsInit();
-  KoneksiInit();
+  // SettingsInit();
+  // KoneksiInit();
 
-  WifiInit();
-  CameraInit();
-  SoundInit();
-  ProccessInit();
-  MqttInit();
+  // WifiInit();
+  // CameraInit();
+  // SoundInit();
+  // ProccessInit();
+  // MqttInit();
 
   MechanicInit();
 
@@ -64,15 +64,15 @@ void setup()
 
 void loop()
 {
-  if (!mqtt.connected())
-  {
-    MqttReconnect();
-  }
-  mqtt.loop();
+  // if (!mqtt.connected())
+  // {
+  //   MqttReconnect();
+  // }
+  // mqtt.loop();
 
-  TokenProcess();
-  GetKwhProcess();
+  // TokenProcess();
+  // GetKwhProcess();
   DetecLowToken();
 
-  OTASERVER.handleClient();
+  // OTASERVER.handleClient();
 }

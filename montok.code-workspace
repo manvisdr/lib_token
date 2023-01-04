@@ -19,10 +19,6 @@
 		{
 			"name": "esp32dev_lora_snippet",
 			"path": "esp32dev_lora_snippet"
-		},
-		{
-			"name": "esp32_sound_recorder",
-			"path": "esp32_sound_recorder"
 		}
 	],
 	"settings": {

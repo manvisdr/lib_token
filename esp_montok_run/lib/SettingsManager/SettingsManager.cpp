@@ -23,8 +23,8 @@
 #include "SettingsManager.h"
 #include "debug_macro.h"
 #ifdef ARDUINO_ARCH_ESP32
-#include <LittleFS.h>
-#define SPIFFS LITTLEFS
+#include <SPIFFS.h>
+#define SPIFFS SPIFFS
 #endif
 #ifdef ARDUINO_ARCH_ESP8266
 #include "FS.h"
@@ -38,11 +38,11 @@ int SettingsManager::readSettings(const char *fileName)
   DBGLN("Reading settings from: %s", fileName);
   unsigned int loaded = SM_SUCCESS;
   openSPIFFS();
-  File file = LittleFS.open(fileName, "r");
+  File file = SPIFFS.open(fileName, "r");
   if (!file)
   {
     DBGLN("Could not open file");
-    LittleFS.end();
+    SPIFFS.end();
     loaded = SM_ERROR;
   }
   else
@@ -51,7 +51,7 @@ int SettingsManager::readSettings(const char *fileName)
     getFileContent(js, file);
     loaded = loadJson(js);
     file.close();
-    LittleFS.end();
+    SPIFFS.end();
   }
   DBGLN("Closing file");
   return loaded;
@@ -73,11 +73,11 @@ int SettingsManager::writeSettings(const char *fileName, JsonVariant conf)
   DBGLN("Writing settings to: %s", fileName);
   openSPIFFS();
 
-  File file = LittleFS.open(fileName, "w");
+  File file = SPIFFS.open(fileName, "w");
   if (!file)
   {
     DBGLN("Could not write in file");
-    LittleFS.end();
+    SPIFFS.end();
     return SM_ERROR;
   }
   else
@@ -87,8 +87,8 @@ int SettingsManager::writeSettings(const char *fileName, JsonVariant conf)
     DBGLN("File written");
   }
   file.close();
-  LittleFS.end();
-  DBGLN("File and LittleFS closed");
+  SPIFFS.end();
+  DBGLN("File and SPIFFS closed");
   return SM_SUCCESS;
 }
 
@@ -137,14 +137,14 @@ int SettingsManager::loadJson(const char *payload)
 */
 void SettingsManager::openSPIFFS()
 {
-  if (!LittleFS.begin())
+  if (!SPIFFS.begin())
   {
     delay(100);
-    DBGLN("Could not mount LittleFS file system");
+    DBGLN("Could not mount SPIFFS file system");
   }
   else
   {
-    DBGLN("LittleFS file system, open");
+    DBGLN("SPIFFS file system, open");
   }
 }
 

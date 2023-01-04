@@ -1,7 +1,7 @@
 {
   "device": {
     "id": "007",
-    "serialnum": "TOKONL2P220V0001",
+    "serialnum": "TOKONL2P220V0002",
     "firmwareversion": 1.0,
     "status": "running"
   },
@@ -10,7 +10,7 @@
     "uuid": 12414314
   },
   "wifi": {
-    "ssid": "",
-    "password": ""
+    "ssid": "MGI-MNC",
+    "password": "#neurixmnc#"
   }
 }

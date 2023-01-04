@@ -3,6 +3,16 @@
 #include <math.h>
 #include <arduinoFFT.h>
 #include <timeout.h>
+#include <WiFi.h>
+#include <WiFiClient.h>
+#include <PubSubClient.h>
+
+WiFiClient client;
+PubSubClient mqtt(client);
+IPAddress mgiServer(203, 194, 112, 238);
+
+const char ssid[] = "MGI-MNC";
+const char pass[] = "#neurixmnc#";
 
 #define PIN_SOUND_SCK 13 // BCK // CLOCK
 #define PIN_SOUND_WS 2   // WS
@@ -20,13 +30,14 @@ static float energy[OCTAVES];
 
 // A-weighting curve from 31.5 Hz ... 8000 Hz
 static const float aweighting[] = {-39.4, -26.2, -16.1, -8.6, -3.2, 0.0, 1.2, 1.0, -1.1};
-static unsigned int bell = 0;
-static unsigned int fireAlarm = 0;
+static unsigned int hexingShort = 0;
+static unsigned int hexingLong = 0;
+static unsigned int itronShortFast = 0;
 static unsigned long ts = millis();
 static unsigned long last = micros();
-static unsigned int sum = 0;
-static unsigned int mn = 9999;
-static unsigned int mx = 0;
+unsigned int sum = 0;
+unsigned int mn = 9999;
+unsigned int mx = 0;
 static unsigned int cnts = 0;
 static unsigned long lastTrigger[2] = {0, 0};
 
@@ -168,6 +179,7 @@ void calculateMetrics(int val)
   {
     mn = val;
   }
+  Serial.printf("NOISE >> MIN:%d MAX:%d AVG:%2.f\n", mn, mx, sum / cnt);
 }
 
 void SoundLooping()
@@ -197,13 +209,15 @@ void SoundLooping()
   SoundPeak = (int)floor(fft.MajorPeak());
   // detectLong = detectFrequency(&bell, 22, peak, 117, 243, true);
   // detectShort = detectFrequency(&bell, 2, peak, 117, 243, true);
+  calculateMetrics(loudness);
 }
 
 bool SoundDetectLong()
 {
   SoundLooping();
-  bool detectedLong = detectFrequency(&bell, 22, SoundPeak, 117, 243, true);
-  bool detectedShort = detectFrequency(&bell, 2, SoundPeak, 117, 243, true);
+  bool detectedLong = detectFrequency(&hexingLong, 22, SoundPeak, 117, 243, true);
+  bool detectedShort = detectFrequency(&hexingShort, 2, SoundPeak, 117, 243, true);
+  // bool detectedShortItronFast = detectFrequency(&itronShortFast, 6, SoundPeak, 168, 199, true);
 
   // Serial.printf("%d %d %d\n", SoundPeak, detectedLong, detectedShort); //, detectLongCnt, detectShortCnt);
   if (!detectedShort and (detectShortCnt > 35) or detectedLong)
@@ -240,8 +254,9 @@ bool SoundDetectLong()
 bool SoundDetectShort()
 {
   SoundLooping();
-  bool detectedLong = detectFrequency(&bell, 22, SoundPeak, 117, 243, true);
-  bool detectedShort = detectFrequency(&bell, 2, SoundPeak, 117, 243, true);
+  bool detectedLong = detectFrequency(&hexingLong, 22, SoundPeak, 117, 243, true);
+  bool detectedShort = detectFrequency(&hexingShort, 2, SoundPeak, 117, 243, true);
+  bool detectedShortItronFast = detectFrequency(&itronShortFast, 6, SoundPeak, 168, 199, true);
 
   // Serial.printf("%d %d %d %d %d\n", SoundPeak, detectedLong, detectedShort, detectLongCnt, detectShortCnt);
   if (!detectedShort and (detectShortCnt > 1 and detectShortCnt < 35))
@@ -261,6 +276,45 @@ bool SoundDetectShort()
     }
     // Serial.println("DETEK LONG BEEP");
     else if (detectedShort) // and !detectLong)
+    {
+      cntDetected++;
+      detectShortCnt++;
+    }
+    else
+    {
+      cntDetected = 0;
+      detectShortCnt = 0;
+      detectLongCnt = 0;
+    }
+    return false;
+  }
+}
+
+bool SoundDetectShortItron()
+{
+  SoundLooping();
+  bool detectedLong = detectFrequency(&hexingLong, 22, SoundPeak, 117, 243, true);
+  // bool detectedShort = detectFrequency(&hexingShort, 2, SoundPeak, 117, 243, true);
+  bool detectedShortItronFast = detectFrequency(&itronShortFast, 6, SoundPeak, 185, 199, true);
+
+  Serial.printf("%d %d %d %d %d\n", SoundPeak, detectedLong, detectedShortItronFast, detectLongCnt, detectShortCnt);
+  if (detectedShortItronFast and (detectShortCnt > 100 /*and detectShortCnt < 35)*/))
+  {
+    Serial.println("DETECTED SHORT BEEP");
+    cntDetected = 0;
+    detectShortCnt = 0;
+    detectLongCnt = 0;
+    return true;
+  }
+  else
+  {
+    // if (detectedLong)
+    // {
+    //   cntDetected++;
+    //   detectLongCnt++;
+    // }
+    // Serial.println("DETEK LONG BEEP");
+    if (detectedShortItronFast) // and !detectLong)
     {
       cntDetected++;
       detectShortCnt++;
@@ -313,32 +367,68 @@ bool DetectionLowToken()
   }
   return timerStart;
 }
+
+void reconnect()
+{
+  // Loop until we're reconnected
+  while (!mqtt.connected())
+  {
+    Serial.print("Attempting MQTT connection...");
+    // Attempt to connect
+    if (mqtt.connect("arduinoClient"))
+    {
+      Serial.println("connected");
+      // Once connected, publish an announcement...
+      mqtt.publish("outTopic", "hello world");
+      // ... and resubscribe
+      mqtt.subscribe("inTopic");
+    }
+    else
+    {
+      Serial.print("failed, rc=");
+      Serial.print(mqtt.state());
+      Serial.println(" try again in 5 seconds");
+      // Wait 5 seconds before retrying
+      delay(5000);
+    }
+  }
+}
+
 Timeout timer;
 int counter = 0;
 void setup()
 {
   Serial.begin(115200);
   timer.prepare(5000);
+  WiFi.begin(ssid, pass);
   SoundInit();
+  mqtt.setServer(mgiServer, 1883);
 }
 
 void loop()
 {
+  if (!mqtt.connected())
+  {
+    reconnect();
+  }
+  mqtt.loop();
+
   // DetectionLowToken();
-  if (SoundDetectLong())
+  if (SoundDetectShortItron())
   {
     timer.start();
     counter++;
   }
   else if (timer.time_over())
   {
-    Serial.print("TIMEOUT...");
-    Serial.println("RESET");
+    // Serial.print("TIMEOUT...");
+    // Serial.println("RESET");
     counter = 0;
   }
 
   if (/* timer.time_over()  and */ counter > 13)
   {
+    mqtt.publish("/sound", "DETECT ITRON");
     Serial.println("DETECK LOW TOKEN");
     Serial.println("SEND NOTIFICATION");
     counter = 0;

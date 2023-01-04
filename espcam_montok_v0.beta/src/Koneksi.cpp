@@ -12,14 +12,14 @@ void KoneksiInit()
   SerialBT.begin(bluetooth_name);
   SerialBT.register_callback(BluetoothCallback);
 
-  // xTaskCreatePinnedToCore(
-  //     CheckPingBackground,
-  //     "pingServer",     // Task name
-  //     5000,             // Stack size (bytes)
-  //     NULL,             // Parameter
-  //     tskIDLE_PRIORITY, // Task priority
-  //     NULL,             // Task handle
-  //     0);
+  xTaskCreatePinnedToCore(
+      CheckPingBackground,
+      "pingServer",     // Task name
+      5000,             // Stack size (bytes)
+      NULL,             // Parameter
+      tskIDLE_PRIORITY, // Task priority
+      NULL,             // Task handle
+      0);
 }
 
 void BluetoothCallback(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)
@@ -213,7 +213,8 @@ void CheckPingServer()
 
 void CheckPingBackground(void *parameter)
 {
-  pingTime = Alarm.timerRepeat(10, CheckPingServer);
+  // pingTime = Alarm.timerRepeat(10, CheckPingServer);
+  Alarm.alarmOnce(10, CheckPingSend);
   pingTimeSend = Alarm.timerRepeat(30, CheckPingSend);
   for (;;)
   {

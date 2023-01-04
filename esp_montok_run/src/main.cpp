@@ -20,13 +20,16 @@
 
 #include <TimeLib.h>
 #include <TimeAlarms.h>
+#include <timeout.h>
 
 #include <FS.h>
-#include <LittleFS.h>
+#include <SPIFFS.h>
 
 AlarmId pingTime;
 AlarmId pingTimeSend;
 Adafruit_MCP23017 mcp;
+int counter = 0;
+bool soundGagalTimeout = false;
 
 #define EEPROM_SIZE 128
 
@@ -48,13 +51,11 @@ Adafruit_MCP23017 mcp;
 #define HREF_GPIO_NUM 23
 #define PCLK_GPIO_NUM 22
 
-// #define PIN_MCP_SCL 12
-// #define PIN_MCP_SDA 13
-#define PIN_MCP_SCL 22
-#define PIN_MCP_SDA 21
-#define PIN_SOUND_SCK 14 // BCK // CLOCK 14
-#define PIN_SOUND_WS 2   // WS 2
-#define PIN_SOUND_SD 15  // DATA IN 15
+#define PIN_MCP_SCL 15
+#define PIN_MCP_SDA 14
+#define PIN_SOUND_SCK 13 // BCK // CLOCK
+#define PIN_SOUND_WS 2   // WS
+#define PIN_SOUND_SD 12  // DATA IN
 
 #define SOL_0 0
 #define SOL_1 1
@@ -76,13 +77,40 @@ SettingsManager settings;
 BluetoothSerial SerialBT;
 WiFiClient wificlient;
 PubSubClient mqtt(wificlient);
-WebServer OTASERVER(80);
+// WebServer OTASERVER(80);
 IPAddress mqttServer(203, 194, 112, 238);
+Timeout timergagal;
+Timeout timer;
+#define ITRON
+// #define HEXING
+#ifdef ITRON
+int delayStatus = 700;
+int delayNominal = 1700;
+int delaySaldo = 4000;
+#endif
+#ifdef HEXING
+int delayStatus = 1100;
+int delayNominal = 5200;
+int delaySaldo = 11000;
+#endif
+
+enum class Status : uint8_t
+{
+  NONE,
+  IDLE,
+  GET_KWH,
+  PROCCESS_TOKEN,
+  SEND_IMAGE_SALDO,
+  SEND_IMAGE_NOMINAL,
+  NOTIF_LOW_SALDO,
+};
+
+Status status = Status::NONE;
 
 const char *configFile = "/config.json";
 char productName[16] = "TOKEN-ONLINE_";
-char *wifissidbuff;
-char *wifipassbuff;
+char wifissidbuff[20];
+char wifipassbuff[20];
 const char *wifissid = "MGI-MNC";
 const char *wifipass = "#neurixmnc#";
 
@@ -97,15 +125,18 @@ const char *MqttPass = "mgi2022";
 
 char topicREQToken[50];
 char topicRSPToken[50];
+char topicRSPSound[50];
 char topicREQView[50];
 char topicRSPView[50];
 char topicRSPSignal[50];
+char topicRSPStatus[50];
 
 char PrevToken[21];
 char NowToken[21];
 
 long start_wifi_millis;
 long wifi_timeout = 10000;
+long tOut;
 int cntDetected;
 int cntLoss;
 
@@ -126,7 +157,11 @@ static float energy[OCTAVES];
 // A-weighting curve from 31.5 Hz ... 8000 Hz
 static const float aweighting[] = {-39.4, -26.2, -16.1, -8.6, -3.2, 0.0, 1.2, 1.0, -1.1};
 static unsigned int bell = 0;
-
+static unsigned int hexingShort = 0;
+static unsigned int hexingLong = 0;
+static unsigned int itronShortFast = 0;
+static unsigned int itronBerhasilKantor = 0;
+static unsigned int itronGagalKantor = 0;
 static unsigned long ts = millis();
 static unsigned long last = micros();
 static unsigned int sum = 0;
@@ -184,11 +219,39 @@ int PORT = 3300;
 #define TIMEOUT 20000
 // dummy
 
-long start_wifi_millis;
-long wifi_timeout = 10000;
-int cntLoss;
 char *sPtr[20];
 char *strData = NULL; // this is allocated in separate and needs to be free( ) eventually
+
+void MqttCustomPublish(char *path, String msg);
+void MqttPublishStatus(String msg);
+bool MechanicTyping(int pin)
+{
+  mcp.digitalWrite(pin, HIGH);
+  delay(150);
+  mcp.digitalWrite(pin, LOW);
+  return true;
+}
+
+void MechanicInit()
+{
+  Wire.begin(PIN_MCP_SDA, PIN_MCP_SCL);
+  mcp.begin(&Wire);
+  for (int i = 0; i < 16; i++)
+  {
+    mcp.pinMode(i, OUTPUT); // MCP23017 pins are set for inputs
+    // delay(10);
+  }
+  for (int i = 0; i < 16; i++)
+  {
+    MechanicTyping(i);
+    // delay(10);
+  }
+}
+
+void MechanicEnter()
+{
+  MechanicTyping(11);
+}
 
 bool SettingsInit()
 {
@@ -218,7 +281,6 @@ bool SettingsInit()
   return true;
 }
 
-bool SettingsLoad();
 bool SettingsWifiSave(char *ssid, char *pass)
 {
   settings.setChar("wifi.ssid", ssid);
@@ -257,391 +319,6 @@ int WiFiFormParsing(String str, // pass as a reference to avoid double memory us
   return n;
 }
 
-void KoneksiInit()
-{
-  SerialBT.begin(bluetooth_name);
-  SerialBT.register_callback(BluetoothCallback);
-
-  // xTaskCreatePinnedToCore(
-  //     CheckPingBackground,
-  //     "pingServer",     // Task name
-  //     5000,             // Stack size (bytes)
-  //     NULL,             // Parameter
-  //     tskIDLE_PRIORITY, // Task priority
-  //     NULL,             // Task handle
-  //     0);
-}
-
-void BluetoothCallback(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)
-{
-  char serialBTBuffer[50];
-
-  if (event == ESP_SPP_SRV_OPEN_EVT)
-  {
-    Serial.println("BT Client Connected");
-    KoneksiStage = BT_INIT;
-  }
-
-  if (event == ESP_SPP_DATA_IND_EVT and KoneksiStage == BT_INIT)
-  {
-    int N = WiFiFormParsing(SerialBT.readString(), sPtr, 20, &strData);
-    if (N == 2)
-    {
-      strcpy(wifissidbuff, sPtr[0]);
-      strcpy(wifipassbuff, sPtr[1]);
-      // }
-      Serial.println(wifissidbuff);
-      Serial.println(wifipassbuff);
-      SettingsWifiSave(wifissidbuff, wifipassbuff);
-      ESP.restart();
-    }
-
-    // if (event == ESP_SPP_DATA_IND_EVT and KoneksiStage == BT_INIT)
-    // {
-    //   strcpy(serialBTBuffer, SerialBT.readString().c_str());
-    //   if (WiFIQRCheck(serialBTBuffer))
-    //   {
-    //     WiFiQRParsing(serialBTBuffer, &wifissidbuff, &wifipassbuff);
-    //     Serial.println(wifissidbuff);
-    //     Serial.println(wifipassbuff);
-    //   }
-    //   else
-    //     Serial.println("NOT WIFI QR");
-    // }
-  }
-}
-void WifiInit()
-{
-  if (strcmp(wifipassbuff, "NULL") == 0)
-    WiFi.begin(wifissidbuff, NULL);
-  else
-    WiFi.begin(wifissidbuff, wifipassbuff);
-  while (WiFi.status() != WL_CONNECTED)
-  {
-    delay(500);
-    Serial.print(".");
-    if (millis() - start_wifi_millis > wifi_timeout)
-    {
-      WiFi.disconnect(true, true);
-    }
-  }
-  Serial.println("WifiInit()...Successfull");
-  Serial.print("WiFi connected to");
-  Serial.print(wifissidbuff);
-  Serial.print(" IP: ");
-  Serial.println(WiFi.localIP());
-
-  OTASERVER.on("/", []()
-               { OTASERVER.send(200, "text/plain", "Hi! I am ESP8266."); });
-
-  ElegantOTA.begin(&OTASERVER); // Start ElegantOTA
-  OTASERVER.begin();
-}
-
-void MqttCustomPublish(char *path, String msg);
-
-String sendPhotoToken(char *status, char *sn, char *token)
-{
-  String getAll;
-  String getBody;
-
-  camera_fb_t *fb = NULL;
-  fb = esp_camera_fb_get();
-  if (!fb)
-  {
-    Serial.println("Camera capture failed");
-    delay(1000);
-    ESP.restart();
-  }
-
-  Serial.println("Connecting to server: " + serverName);
-
-  if (wificlient.connect(serverName.c_str(), serverPort))
-  {
-    Serial.println("Connection successful!");
-    String headNominal = "--MGI\r\nContent-Disposition: form-data; name=" + topupBodyNominal +
-                         "; filename=" + topupFileNominal + "\r\nContent-Type: image/jpeg\r\n\r\n";
-    String headSaldo = "--MGI\r\nContent-Disposition: form-data; name=" + topupBodySaldo +
-                       "; filename=" + topupFileSaldo + "\r\nContent-Type: image/jpeg\r\n\r\n";
-    String tail = "\r\n--MGI--\r\n";
-
-    uint32_t imageLen = fb->len;
-    uint32_t extraLen = headNominal.length() + tail.length();
-    uint32_t totalLen = imageLen + extraLen;
-
-    wificlient.println("POST " + topupEndpoint + "status=" + status +
-                       "&sn_device=" + sn + "&token=" + token + " HTTP/1.1");
-    Serial.println("POST " + topupEndpoint + "status=" + status +
-                   "&sn_device=" + sn + "&token=" + token + " HTTP/1.1");
-
-    wificlient.println("Host: " + serverName);
-    Serial.println("Host: " + serverName);
-    wificlient.println("Content-Length: " + String(totalLen));
-    Serial.println("Content-Length: " + String(totalLen));
-    wificlient.println("Content-Type: multipart/form-data; boundary=MGI");
-    Serial.println("Content-Type: multipart/form-data; boundary=MGI");
-    wificlient.println();
-    Serial.println();
-
-    wificlient.print(headNominal);
-    Serial.print(headNominal);
-    uint8_t *fbBuf = fb->buf;
-    size_t fbLen = fb->len;
-    for (size_t n = 0; n < fbLen; n = n + 1024)
-    {
-      if (n + 1024 < fbLen)
-      {
-        wificlient.write(fbBuf, 1024);
-        fbBuf += 1024;
-      }
-      else if (fbLen % 1024 > 0)
-      {
-        size_t remainder = fbLen % 1024;
-        wificlient.write(fbBuf, remainder);
-      }
-    }
-
-    wificlient.println();
-    Serial.println();
-    wificlient.print(headSaldo);
-    Serial.print(headSaldo);
-
-    // uint8_t *fbBuf = fb->buf;
-    // size_t fbLen = fb->len;
-    // for (size_t n = 0; n < fbLen; n = n + 1024)
-    // {
-    //   if (n + 1024 < fbLen)
-    //   {
-    //     wificlient.write(fbBuf, 1024);
-    //     fbBuf += 1024;
-    //   }
-    //   else if (fbLen % 1024 > 0)
-    //   {
-    //     size_t remainder = fbLen % 1024;
-    //     wificlient.write(fbBuf, remainder);
-    //   }
-    // }
-
-    wificlient.print(tail);
-    Serial.print(tail);
-
-    esp_camera_fb_return(fb);
-
-    int timoutTimer = 10000;
-    long startTimer = millis();
-    boolean state = false;
-
-    while ((startTimer + timoutTimer) > millis())
-    {
-      Serial.print(".");
-      delay(100);
-      while (wificlient.available())
-      {
-        char c = wificlient.read();
-        if (c == '\n')
-        {
-          if (getAll.length() == 0)
-          {
-            state = true;
-          }
-          getAll = "";
-        }
-        else if (c != '\r')
-        {
-          getAll += String(c);
-        }
-        if (state == true)
-        {
-          getBody += String(c);
-        }
-        startTimer = millis();
-      }
-      if (getBody.length() > 0)
-      {
-        break;
-      }
-    }
-    Serial.println();
-    // wificlient.stop();
-    Serial.println(getBody);
-  }
-  else
-  {
-    getBody = "Connection to " + serverName + " failed.";
-    Serial.println(getBody);
-  }
-  return getBody;
-}
-
-String sendPhotoViewKWH(char *sn)
-{
-  String getAll;
-  String getBody;
-
-  camera_fb_t *fb = NULL;
-  fb = esp_camera_fb_get();
-  if (!fb)
-  {
-    Serial.println("Camera capture failed");
-    delay(1000);
-    ESP.restart();
-  }
-
-  Serial.println("Connecting to server: " + serverName);
-
-  if (wificlient.connect(serverName.c_str(), serverPort))
-  {
-    Serial.println("Connection successful!");
-    String head = "--MGI\r\nContent-Disposition: form-data; name=" + saldoBody + "; filename=" + saldoFileName + "\r\nContent-Type: image/jpeg\r\n\r\n";
-    String tail = "\r\n--MGI--\r\n";
-
-    uint32_t imageLen = fb->len;
-    uint32_t extraLen = head.length() + tail.length();
-    uint32_t totalLen = imageLen + extraLen;
-
-    wificlient.println("POST " + saldoEndpoint + "&sn_device=" + sn + " HTTP/1.1");
-    Serial.println("POST " + saldoEndpoint + "&sn_device=" + sn + " HTTP/1.1");
-
-    wificlient.println("Host: " + serverName);
-    wificlient.println("Content-Length: " + String(totalLen));
-    wificlient.println("Content-Type: multipart/form-data; boundary=MGI");
-    wificlient.println();
-    wificlient.print(head);
-
-    uint8_t *fbBuf = fb->buf;
-    size_t fbLen = fb->len;
-    for (size_t n = 0; n < fbLen; n = n + 1024)
-    {
-      if (n + 1024 < fbLen)
-      {
-        wificlient.write(fbBuf, 1024);
-        fbBuf += 1024;
-      }
-      else if (fbLen % 1024 > 0)
-      {
-        size_t remainder = fbLen % 1024;
-        wificlient.write(fbBuf, remainder);
-      }
-    }
-    wificlient.print(tail);
-
-    esp_camera_fb_return(fb);
-
-    int timoutTimer = 10000;
-    long startTimer = millis();
-    boolean state = false;
-
-    while ((startTimer + timoutTimer) > millis())
-    {
-      Serial.print(".");
-      delay(100);
-      while (wificlient.available())
-      {
-        char c = wificlient.read();
-        if (c == '\n')
-        {
-          if (getAll.length() == 0)
-          {
-            state = true;
-          }
-          getAll = "";
-        }
-        else if (c != '\r')
-        {
-          getAll += String(c);
-        }
-        if (state == true)
-        {
-          getBody += String(c);
-        }
-        startTimer = millis();
-      }
-      if (getBody.length() > 0)
-      {
-        break;
-      }
-    }
-    Serial.println();
-    // wificlient.stop();
-    Serial.println(getBody);
-  }
-  else
-  {
-    getBody = "Connection to " + serverName + " failed.";
-    Serial.println(getBody);
-  }
-  return getBody;
-}
-
-char *extract_between(const char *str, const char *p1, const char *p2)
-{
-  const char *i1 = strstr(str, p1);
-  if (i1 != NULL)
-  {
-    const size_t pl1 = strlen(p1);
-    const char *i2 = strstr(i1 + pl1, p2);
-    if (p2 != NULL)
-    {
-      /* Found both markers, extract text. */
-      const size_t mlen = i2 - (i1 + pl1);
-      char *ret = (char *)malloc(mlen + 1);
-      if (ret != NULL)
-      {
-        memcpy(ret, i1 + pl1, mlen);
-        ret[mlen] = '\0';
-        return ret;
-      }
-    }
-  }
-}
-
-void WiFiQRParsing(const char *input, char **destSSID, char **destPASS)
-{
-  char *s;
-  s = strstr(input, ";T:"); // search for string "hassasin" in buff
-  if (s != NULL)            // if successful then s now points at "hassasin"
-  {
-    *destSSID = extract_between(input, "WIFI:S:", ";T:");
-    if (strcmp(extract_between(input, ";T:", ";P:"), "nopass") == 0)
-    {
-      *destPASS = NULL;
-    }
-    else
-      *destPASS = extract_between(input, ";P:", ";H:");
-  } // index of "hassasin" in buff can be found by pointer subtraction
-  else
-  {
-    *destSSID = extract_between(input, "WIFI:S:", ";;");
-    *destPASS = NULL;
-  }
-}
-
-bool WiFIQRCheck(const char *input)
-{
-  char *s;
-  s = strstr(input, "WIFI:"); // search for string "hassasin" in buff
-  if (s != NULL)              // if successful then s now points at "hassasin"
-    return true;
-  else
-    return false;
-}
-
-void printDeviceAddress()
-{
-  const uint8_t *point = esp_bt_dev_get_address();
-  for (int i = 0; i < 6; i++)
-  {
-    char str[3];
-    sprintf(str, "%02X", (int)point[i]);
-    Serial.print(str);
-
-    if (i < 5)
-    {
-      Serial.print(":");
-    }
-  }
-}
-
 int CheckPingGateway()
 {
   int cntLoss;
@@ -672,29 +349,7 @@ void CheckPingServer()
     else
       cntLoss++;
   }
-  Serial.println(cntLoss);
-}
-
-int CheckPingGoogle()
-{
-  int cntLoss;
-  int pingReturn;
-  if (WiFi.status() == WL_CONNECTED)
-  {
-    if (Ping.ping("www.google.com"))
-      cntLoss = 0;
-    else
-      cntLoss++;
-  }
-  else
-    pingReturn = 100;
-  if (cntLoss > 7)
-    pingReturn = 0;
-  else if (cntLoss = 0)
-    pingReturn = 100;
-  else
-    pingReturn = 50;
-  return cntLoss;
+  Serial.printf("CheckPingServer() : cntLoss=%d\n", cntLoss);
 }
 
 void CheckPingSend()
@@ -702,23 +357,469 @@ void CheckPingSend()
   if (cntLoss == 3)
   {
     MqttCustomPublish(topicRSPSignal, "1");
+    Serial.println(F("CheckPingSend() : MqttCustomPublish: 1"));
     cntLoss = 0;
   }
   else if (cntLoss == 2)
   {
     MqttCustomPublish(topicRSPSignal, "2");
+    Serial.println(F("CheckPingSend() : MqttCustomPublish: 2"));
     cntLoss = 0;
   }
   else if (cntLoss <= 1)
   {
     MqttCustomPublish(topicRSPSignal, "3");
+    Serial.println(F("CheckPingSend() : MqttCustomPublish: 3"));
     cntLoss = 0;
+  }
+}
+
+void CheckPingBackground(void *parameter)
+{
+  pingTime = Alarm.timerRepeat(10, CheckPingServer);
+  Alarm.alarmOnce(10, CheckPingSend);
+  pingTimeSend = Alarm.timerRepeat(30, CheckPingSend);
+  for (;;)
+  {
+    // Serial.print("Main Ping: Executing on core ");
+    // Serial.println(xPortGetCoreID());
+    Alarm.delay(1000);
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
   }
 }
 
 void dummySignalSend()
 {
   MqttCustomPublish(topicRSPSignal, "3");
+}
+
+void BluetoothCallback(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)
+{
+  char serialBTBuffer[50];
+
+  if (event == ESP_SPP_SRV_OPEN_EVT)
+  {
+    Serial.println("BT Client Connected");
+    KoneksiStage = BT_INIT;
+  }
+
+  if (event == ESP_SPP_DATA_IND_EVT and KoneksiStage == BT_INIT)
+  {
+    int N = WiFiFormParsing(SerialBT.readString(), sPtr, 20, &strData);
+    if (N == 2)
+    {
+      strcpy(wifissidbuff, sPtr[0]);
+      strcpy(wifipassbuff, sPtr[1]);
+      // }
+      Serial.println(wifissidbuff);
+      Serial.println(wifipassbuff);
+      SettingsWifiSave(wifissidbuff, wifipassbuff);
+      ESP.restart();
+    }
+  }
+}
+
+void KoneksiInit()
+{
+  SerialBT.begin(bluetooth_name);
+  SerialBT.register_callback(BluetoothCallback);
+
+  // xTaskCreatePinnedToCore(
+  //     CheckPingBackground,
+  //     "pingServer",     // Task name
+  //     5000,             // Stack size (bytes)
+  //     NULL,             // Parameter
+  //     tskIDLE_PRIORITY, // Task priority
+  //     NULL,             // Task handle
+  //     0);
+}
+
+void WifiInit()
+{
+  if (strcmp(wifipassbuff, "NULL") == 0)
+    WiFi.begin(wifissidbuff, NULL);
+  else
+    WiFi.begin(wifissidbuff, wifipassbuff);
+  while (WiFi.status() != WL_CONNECTED)
+  {
+    delay(500);
+    Serial.print(".");
+    if (millis() - start_wifi_millis > wifi_timeout)
+    {
+      WiFi.disconnect(true, true);
+    }
+  }
+  // WiFi.setAutoReconnect(true);
+  // WiFi.persistent(true);
+  Serial.println("WifiInit()...Successfull");
+  Serial.print("WiFi connected to");
+  Serial.print(wifissidbuff);
+  Serial.print(" IP: ");
+  Serial.println(WiFi.localIP());
+
+  // OTASERVER.on("/", []()
+  //              { OTASERVER.send(200, "text/plain", "Hi! I am ESP8266."); });
+
+  // ElegantOTA.begin(&OTASERVER); // Start ElegantOTA
+  // OTASERVER.begin();
+}
+
+void MqttCustomPublish(char *path, String msg);
+
+String sendPhotoToken(char *status, char *sn, char *token)
+{
+  String getAll;
+  String getBody;
+  WiFiClient postClient;
+  camera_fb_t *fb = NULL;
+
+  fb = esp_camera_fb_get();
+  esp_camera_fb_return(fb); // dispose the buffered image
+  fb = NULL;                // reset to capture errors
+  fb = esp_camera_fb_get(); // get fresh image
+  if (!fb)
+  {
+    Serial.println("Camera capture failed");
+    delay(1000);
+    ESP.restart();
+  }
+
+  Serial.println("Connecting to server: " + serverName);
+
+  if (postClient.connect(serverName.c_str(), serverPort))
+  {
+    Serial.println("Connection successful!");
+    String headNominal = "--MGI\r\nContent-Disposition: form-data; name=" + topupBodyNominal +
+                         "; filename=" + topupFileNominal + "\r\nContent-Type: image/jpeg\r\n\r\n";
+    String headSaldo = "--MGI\r\nContent-Disposition: form-data; name=" + topupBodySaldo +
+                       "; filename=" + topupFileSaldo + "\r\nContent-Type: image/jpeg\r\n\r\n";
+    String tail = "\r\n--MGI--\r\n";
+
+    uint32_t imageLen = fb->len;
+    uint32_t extraLen = headNominal.length() + tail.length();
+    uint32_t totalLen = imageLen + extraLen;
+
+    postClient.println("POST " + topupEndpoint + "status=" + status +
+                       "&sn_device=" + sn + "&token=" + token + " HTTP/1.1");
+    Serial.println("POST " + topupEndpoint + "status=" + status +
+                   "&sn_device=" + sn + "&token=" + token + " HTTP/1.1");
+
+    postClient.println("Host: " + serverName);
+    Serial.println("Host: " + serverName);
+    postClient.println("Content-Length: " + String(totalLen));
+    Serial.println("Content-Length: " + String(totalLen));
+    postClient.println("Content-Type: multipart/form-data; boundary=MGI");
+    Serial.println("Content-Type: multipart/form-data; boundary=MGI");
+    postClient.println();
+    Serial.println();
+
+    postClient.print(headNominal);
+    Serial.print(headNominal);
+    uint8_t *fbBuf = fb->buf;
+    size_t fbLen = fb->len;
+    for (size_t n = 0; n < fbLen; n = n + 1024)
+    {
+      if (n + 1024 < fbLen)
+      {
+        postClient.write(fbBuf, 1024);
+        fbBuf += 1024;
+      }
+      else if (fbLen % 1024 > 0)
+      {
+        size_t remainder = fbLen % 1024;
+        postClient.write(fbBuf, remainder);
+      }
+    }
+
+    postClient.println();
+    Serial.println();
+    postClient.print(headSaldo);
+    Serial.print(headSaldo);
+
+    // uint8_t *fbBuf = fb->buf;
+    // size_t fbLen = fb->len;
+    // for (size_t n = 0; n < fbLen; n = n + 1024)
+    // {
+    //   if (n + 1024 < fbLen)
+    //   {
+    //     postClient.write(fbBuf, 1024);
+    //     fbBuf += 1024;
+    //   }
+    //   else if (fbLen % 1024 > 0)
+    //   {
+    //     size_t remainder = fbLen % 1024;
+    //     postClient.write(fbBuf, remainder);
+    //   }
+    // }
+
+    postClient.print(tail);
+    Serial.print(tail);
+
+    esp_camera_fb_return(fb);
+
+    int timoutTimer = 10000;
+    long startTimer = millis();
+    boolean state = false;
+
+    while ((startTimer + timoutTimer) > millis())
+    {
+      Serial.print(".");
+      delay(100);
+      while (postClient.available())
+      {
+        char c = postClient.read();
+        if (c == '\n')
+        {
+          if (getAll.length() == 0)
+          {
+            state = true;
+          }
+          getAll = "";
+        }
+        else if (c != '\r')
+        {
+          getAll += String(c);
+        }
+        if (state == true)
+        {
+          getBody += String(c);
+        }
+        startTimer = millis();
+      }
+      if (getBody.length() > 0)
+      {
+        break;
+      }
+    }
+    Serial.println();
+    // postClient.stop();
+    Serial.println(getBody);
+  }
+  else
+  {
+    getBody = "Connection to " + serverName + " failed.";
+    Serial.println(getBody);
+  }
+  return getBody;
+}
+
+String sendPhotoViewKWH(char *sn)
+{
+  String getAll;
+  String getBody;
+  WiFiClient postClient;
+  camera_fb_t *fb = NULL;
+  fb = esp_camera_fb_get();
+  esp_camera_fb_return(fb); // dispose the buffered image
+  fb = NULL;                // reset to capture errors
+  fb = esp_camera_fb_get(); // get fresh image
+  // camera_fb_t *fb = esp_camera_fb_get();
+  if (!fb)
+  {
+    Serial.println("Camera capture failed");
+    delay(1000);
+    ESP.restart();
+  }
+
+  Serial.println("Connecting to server: " + serverName);
+
+  if (postClient.connect(serverName.c_str(), serverPort))
+  {
+    Serial.println("Connection successful!");
+    String head = "--MGI\r\nContent-Disposition: form-data; name=" + saldoBody + "; filename=" + saldoFileName + "\r\nContent-Type: image/jpeg\r\n\r\n";
+    String tail = "\r\n--MGI--\r\n";
+
+    uint32_t imageLen = fb->len;
+    uint32_t extraLen = head.length() + tail.length();
+    uint32_t totalLen = imageLen + extraLen;
+
+    postClient.println("POST " + saldoEndpoint + "&sn_device=" + sn + " HTTP/1.1");
+    Serial.println("POST " + saldoEndpoint + "&sn_device=" + sn + " HTTP/1.1");
+
+    postClient.println("Host: " + serverName);
+    postClient.println("Content-Length: " + String(totalLen));
+    postClient.println("Content-Type: multipart/form-data; boundary=MGI");
+    postClient.println();
+    postClient.print(head);
+
+    uint8_t *fbBuf = fb->buf;
+    size_t fbLen = fb->len;
+    for (size_t n = 0; n < fbLen; n = n + 1024)
+    {
+      if (n + 1024 < fbLen)
+      {
+        postClient.write(fbBuf, 1024);
+        fbBuf += 1024;
+      }
+      else if (fbLen % 1024 > 0)
+      {
+        size_t remainder = fbLen % 1024;
+        postClient.write(fbBuf, remainder);
+      }
+    }
+    postClient.print(tail);
+    esp_camera_fb_return(fb);
+    int timoutTimer = 10000;
+    long startTimer = millis();
+    boolean state = false;
+
+    while ((startTimer + timoutTimer) > millis())
+    {
+      Serial.print(".");
+      delay(100);
+      while (postClient.available())
+      {
+        char c = postClient.read();
+        if (c == '\n')
+        {
+          if (getAll.length() == 0)
+          {
+            state = true;
+          }
+          getAll = "";
+        }
+        else if (c != '\r')
+        {
+          getAll += String(c);
+        }
+        if (state == true)
+        {
+          getBody += String(c);
+        }
+        startTimer = millis();
+      }
+      if (getBody.length() > 0)
+      {
+        break;
+      }
+    }
+    Serial.println();
+    // postClient.stop();
+    Serial.println(getBody);
+  }
+  else
+  {
+    getBody = "Connection to " + serverName + " failed.";
+    Serial.println(getBody);
+  }
+  return getBody;
+}
+
+String headerNotifSaldo(char *sn)
+{
+  // POST /notif/lowsaldo/007 HTTP/1.1
+  // Accept: */*
+  // User-Agent: Thunder Client (https://www.thunderclient.com)
+  // Content-Type: multipart/form-data; boundary=---011000010111000001101001
+  // Host: 203.194.112.238:3300
+
+  String serialnum = String(sn);
+  String data;
+  data = "POST /notif/lowsaldo/" + serialnum + " HTTP/1.1\r\n";
+  data += "Accept: */*\r\n";
+  data += "User-Agent: PostmanRuntime/6.4.1\r\n";
+  data += "Content-Type: multipart/form-data; boundary=---011000010111000001101001";
+  data += "\r\n";
+  data += "Host: ";
+  data += SERVER + ":" + String(PORT);
+  data += "\r\n";
+  data += "\r\n";
+  data += "\r\n";
+  return (data);
+}
+
+String sendNotifSaldo(char *sn)
+{
+  String serverRes;
+  WiFiClient postClient;
+  String headerTxt = headerNotifSaldo(sn);
+  MqttPublishStatus("SEND NOTIF SALDO");
+  if (!postClient.connect(SERVER.c_str(), PORT))
+  {
+    return ("connection failed");
+  }
+
+  MqttPublishStatus("SENDING NOTIF SALDO");
+  Serial.println("SENDING NOTIF SALDO");
+
+  postClient.print(headerTxt);
+
+  delay(20);
+  long tOut = millis() + TIMEOUT;
+  long startTimer = millis();
+  boolean state = false;
+  String getAll;
+  String getBody;
+  while (tOut > millis())
+  {
+    Serial.print(".");
+    delay(100);
+    while (postClient.available())
+    {
+      char c = postClient.read();
+      if (c == '\n')
+      {
+        if (getAll.length() == 0)
+        {
+          state = true;
+        }
+        getAll = "";
+      }
+      else if (c != '\r')
+      {
+        getAll += String(c);
+      }
+      if (state == true)
+      {
+        getBody += String(c);
+      }
+      startTimer = millis();
+    }
+    if (getBody.length() > 0)
+    {
+      break;
+    }
+  }
+  // WifiEspClient.stop();
+  return getBody;
+}
+
+char *extract_between(const char *str, const char *p1, const char *p2)
+{
+  const char *i1 = strstr(str, p1);
+  if (i1 != NULL)
+  {
+    const size_t pl1 = strlen(p1);
+    const char *i2 = strstr(i1 + pl1, p2);
+    if (p2 != NULL)
+    {
+      /* Found both markers, extract text. */
+      const size_t mlen = i2 - (i1 + pl1);
+      char *ret = (char *)malloc(mlen + 1);
+      if (ret != NULL)
+      {
+        memcpy(ret, i1 + pl1, mlen);
+        ret[mlen] = '\0';
+        return ret;
+      }
+    }
+  }
+}
+
+void printDeviceAddress()
+{
+  const uint8_t *point = esp_bt_dev_get_address();
+  for (int i = 0; i < 6; i++)
+  {
+    char str[3];
+    sprintf(str, "%02X", (int)point[i]);
+    Serial.print(str);
+
+    if (i < 5)
+    {
+      Serial.print(":");
+    }
+  }
 }
 
 void CameraInit()
@@ -749,7 +850,7 @@ void CameraInit()
   {
     config.frame_size = FRAMESIZE_VGA; // 1600x1200
     config.jpeg_quality = 10;
-    config.fb_count = 2;
+    config.fb_count = 1;
   }
   else
   {
@@ -986,6 +1087,7 @@ bool SoundDetectLong()
       detectShortCnt = 0;
       detectLongCnt = 0;
     }
+
     return false;
   }
 }
@@ -993,8 +1095,8 @@ bool SoundDetectLong()
 bool SoundDetectShort()
 {
   SoundLooping();
-  bool detectedLong = detectFrequency(&bell, 22, SoundPeak, 117, 243, true);
-  bool detectedShort = detectFrequency(&bell, 2, SoundPeak, 117, 243, true);
+  bool detectedLong = detectFrequency(&bell, 6, SoundPeak, 117, 243, true);
+  bool detectedShort = detectFrequency(&itronShortFast, 6, SoundPeak, 425, 35, true);
 
   // Serial.printf("%d %d %d %d %d\n", SoundPeak, detectedLong, detectedShort, detectLongCnt, detectShortCnt);
   if (!detectedShort and (detectShortCnt > 1 and detectShortCnt < 35))
@@ -1024,111 +1126,82 @@ bool SoundDetectShort()
       detectShortCnt = 0;
       detectLongCnt = 0;
     }
+    MqttCustomPublish("DeteckShort", String(detectedShort));
+    MqttCustomPublish("soundShortcnt", String(SoundPeak));
+
     return false;
   }
 }
 
-void MechanicInit()
+bool SoundDetectShortItron()
 {
-  Wire.begin(PIN_MCP_SDA, PIN_MCP_SCL);
-  mcp.begin(&Wire);
-  for (int i = 0; i < 16; i++)
+  SoundLooping();
+  bool detectedLong = detectFrequency(&hexingLong, 22, SoundPeak, 117, 243, true);
+  // bool detectedShort = detectFrequency(&hexingShort, 2, SoundPeak, 117, 243, true);
+  bool detectedShortItronFast = detectFrequency(&itronShortFast, 6, SoundPeak, 182, 199, true);
+
+  // Serial.printf("%d %d %d %d %d\n", SoundPeak, detectedLong, detectedShortItronFast, detectLongCnt, detectShortCnt);
+  if (detectedShortItronFast and (detectShortCnt > 100 /*and detectShortCnt < 35)*/))
   {
-    if (i < 8)
-      mcp.pinMode(i, INPUT_PULLUP);
-    // Serial.printf("INPUT - %d\n", i);
-    else
-      mcp.pinMode(i, OUTPUT);
-    // Serial.printf("OUTPUT - %d\n", i);
+    MqttCustomPublish(topicRSPSound, "DETECTED SHORT BEEP");
+    Serial.println("DETECTED SHORT BEEP");
+    cntDetected = 0;
+    detectShortCnt = 0;
+    detectLongCnt = 0;
+    return true;
   }
-}
-
-bool MechanicTyping(int pin)
-{
-  mcp.digitalWrite(pin, HIGH);
-  mcp.digitalWrite(pin, LOW);
-  return false;
-}
-
-void MechanicSelect(char chars)
-{
-  char buff[2];
-  // strcpy();
-  unsigned long timeNow = millis();
-  unsigned long timeStart;
-  switch (chars)
-  {
-  case '0':
-    Serial.printf("SELENOID %c ON\n", chars);
-    // MechanicTyping(atoi());
-    timeStart = timeNow;
-    while (!SoundDetectShort())
-    {
-      Serial.println("WAITING RESPONSE FROM SOUND");
-      if (CheckTimeout(&timeNow, &timeStart))
-      {
-        Serial.printf("SELENOID %c OFF\n", chars);
-        break;
-      }
-    }
-  case '1':
-    Serial.printf("SELENOID %c ON\n", chars);
-    break;
-  case '2':
-    Serial.printf("SELENOID %c ON\n", chars);
-    break;
-  case '3':
-    Serial.printf("SELENOID %c ON\n", chars);
-    break;
-  case '4':
-    Serial.printf("SELENOID %c ON\n", chars);
-    break;
-  case '5':
-    Serial.printf("SELENOID %c ON\n", chars);
-    break;
-  case '6':
-    Serial.printf("SELENOID %c ON\n", chars);
-    break;
-  case '7':
-    Serial.printf("SELENOID %c ON\n", chars);
-    break;
-  case '8':
-    Serial.printf("SELENOID %c ON\n", chars);
-    break;
-  case '9':
-    Serial.printf("SELENOID %c ON\n", chars);
-    break;
-  default:
-    break;
-  }
-}
-
-void WifiInit()
-{
-  if (strcmp(wifipassbuff, "NULL") == 0)
-    WiFi.begin(wifissidbuff, NULL);
   else
-    WiFi.begin(wifissidbuff, wifipassbuff);
-  while (WiFi.status() != WL_CONNECTED)
   {
-    delay(500);
-    Serial.print(".");
-    if (millis() - start_wifi_millis > wifi_timeout)
+    // if (detectedLong)
+    // {
+    //   cntDetected++;
+    //   detectLongCnt++;
+    // }
+    // Serial.println("DETEK LONG BEEP");
+    // MqttCustomPublish("sound", "ELSE DETECTED SHORT BEEP");
+    if (detectedShortItronFast) // and !detectLong)
     {
-      WiFi.disconnect(true, true);
+      cntDetected++;
+      detectShortCnt++;
     }
+    else
+    {
+      cntDetected = 0;
+      detectShortCnt = 0;
+      detectLongCnt = 0;
+    }
+    // MqttCustomPublish("DeteckShort", String(detectedShortItronFast));
+    // MqttCustomPublish("soundShortcnt", String(SoundPeak));
+    return false;
   }
-  Serial.println("WifiInit()...Successfull");
-  Serial.print("WiFi connected to");
-  Serial.print(wifissidbuff);
-  Serial.print(" IP: ");
-  Serial.println(WiFi.localIP());
+}
 
-  OTASERVER.on("/", []()
-               { OTASERVER.send(200, "text/plain", "Hi! I am ESP8266."); });
+bool SoundDetectShortItronKantorGagal()
+{
+  bool returning = false;
+  // timergagal.start();
+  // while (state)
+  // {
+  int timoutTimer = 3000;
+  long startTimer = millis();
+  boolean state = false;
 
-  ElegantOTA.begin(&OTASERVER); // Start ElegantOTA
-  OTASERVER.begin();
+  SoundLooping();
+  bool detectedShortGagal = detectFrequency(&itronGagalKantor, 3, SoundPeak, 169, 192, true);
+  // bool detectedShortItronFast = detectFrequency(&itronShortFast, 6, SoundPeak, 168, 199, true);
+
+  return detectedShortGagal;
+  // }
+}
+
+void DetectGagalItronKantor()
+{
+  if (SoundDetectShortItron())
+  {
+    mqtt.publish("sound", "DETECT KANTOR");
+    Serial.println("DETECK LOW TOKEN");
+    Serial.println("SEND NOTIFICATION");
+  }
 }
 
 void callback(char *topic, byte *payload, unsigned int length)
@@ -1179,6 +1252,11 @@ void MqttCustomPublish(char *path, String msg)
   mqtt.publish(path, msg.c_str());
 }
 
+void MqttPublishStatus(String msg)
+{
+  MqttCustomPublish(topicRSPStatus, msg);
+}
+
 void MqttTopicInit()
 {
   // sprintf(topicREQToken, "%s/%s/%s/%s", mqttChannel, "request", idDevice, "token");
@@ -1187,17 +1265,15 @@ void MqttTopicInit()
   sprintf(topicRSPToken, "%s/%s/%s/%s", mqttChannel, "respond", idDevice, "token");
   sprintf(topicRSPView, "%s/%s/%s/%s", mqttChannel, "respond", idDevice, "view");
   sprintf(topicRSPSignal, "%s/%s/%s/%s", mqttChannel, "respond", idDevice, "signal");
+  sprintf(topicRSPStatus, "%s/%s/%s/%s", mqttChannel, "respond", idDevice, "debug");
+  sprintf(topicRSPSound, "%s/%s/%s/%s", mqttChannel, "respond", idDevice, "sound");
 
   Serial.printf("%s\n", topicREQToken);
   Serial.printf("%s\n", topicREQView);
   Serial.printf("%s\n", topicRSPSignal);
+  Serial.printf("%s\n", topicRSPStatus);
   Serial.println(topicRSPToken);
   Serial.println(topicRSPView);
-
-  MqttCustomPublish(topicREQToken, " ");
-  MqttCustomPublish(topicREQView, " ");
-  MqttCustomPublish(topicRSPToken, " ");
-  MqttCustomPublish(topicRSPView, " ");
 }
 
 /* *********************************** MQTT ************************* */
@@ -1211,7 +1287,7 @@ void MqttReconnect()
     if (mqtt.connect("monTok"))
     {
       Serial.println("connected");
-      MqttCustomPublish(topicRSPSignal, "1");
+      MqttPublishStatus("CONNECTED MQTT");
       mqtt.subscribe(topicREQToken);
       mqtt.subscribe(topicREQView);
     }
@@ -1228,45 +1304,42 @@ void MqttReconnect()
 
 bool DetectionLowToken()
 {
-  int cntDetectLong;
-  bool timerStart;
-  long millisNow = millis();
-  long millisDetectLong;
-  long millisNotDetect;
-  if (SoundDetectLong() and !timerStart)
+  if (SoundDetectShortItron())
   {
-    millisDetectLong = millisNow;
-    timerStart = true; // so start value is not updated next time around
-    if (millisNow - millisDetectLong >= 1000)
-    {
-      cntDetectLong++;
-      if (cntDetectLong > 5)
-      {
-        cntDetectLong = 0;
-        timerStart = false;
-      }
-    }
+    timer.start();
+    counter++;
+    Serial.printf("COUNTER SHORT DETECT : %d\n", counter);
+    MqttCustomPublish(topicRSPSound, "COUNTER SOUND " + String(counter));
   }
-  else
+  else if (timer.time_over())
   {
-    millisNotDetect = millisNow;
-    if (millisNow - millisNotDetect > 5000)
-    {
-      cntDetectLong = 0;
-      timerStart = false;
-    }
+    // Serial.print("TIMEOUT...");
+    // Serial.println("RESET");
+    counter = 0;
   }
-  return timerStart;
+
+  if (/* timer.time_over()  and */ counter > 13)
+  {
+    MqttCustomPublish(topicRSPSound, "SEND NOTIFICATION SOUND");
+    sendNotifSaldo(idDevice);
+    Serial.println("DETECK LOW TOKEN");
+    Serial.println("SEND NOTIFICATION");
+    counter = 0;
+  }
+  return true;
 }
 
 void GetKwhProcess()
 {
-  if (received_msg and strcmp(received_payload, "view") == 0)
+  if (received_msg and strcmp(received_topic, topicREQView) == 0 /*and strcmp(received_payload, "view") == 0*/)
   {
+    status = Status::GET_KWH;
+    MqttPublishStatus("REQUESTING BALANCE");
     Serial.println("GET_KWH");
     Serial.println(sendPhotoViewKWH(idDevice));
     // MqttCustomPublish(topicRSPView, "gwtkwh-success");
     received_msg = false;
+    status = Status::IDLE;
   }
 }
 
@@ -1296,11 +1369,24 @@ String body_Saldo()
   return (data);
 }
 
-String headerNominal(size_t length)
+String body_StatusToken()
+{
+  String data;
+  data = "--";
+  data += BOUNDARY;
+  data += F("\r\n");
+  data += F("Content-Disposition: form-data; name=\"imgStatus\"; filename=\"picture.jpg\"\r\n");
+  data += F("Content-Type: image/jpeg\r\n");
+  data += F("\r\n");
+
+  return (data);
+}
+
+String headerNominal(char *id, size_t length)
 {
   String data;
   // data = F("POST /topup/response/?status=success&sn_device=5253252&token=33333 HTTP/1.1\r\n");
-  data = "POST /topup/response/nominal/?status=success&sn_device=" + String(idDevice) + " HTTP/1.1\r\n";
+  data = "POST /topup/response/nominal/?sn_device=" + String(id) + " HTTP/1.1\r\n";
   data += "cache-control: no-cache\r\n";
   data += "Content-Type: multipart/form-data; boundary=";
   data += BOUNDARY;
@@ -1343,113 +1429,159 @@ String headerSaldo(char *token, size_t length)
   return (data);
 }
 
-String sendImageNominal(uint8_t *data_pic, size_t size_pic)
+String headerStatusToken(char *sn, size_t length)
 {
-  String serverRes;
-  String bodyNominal = body_Nominal();
-
-  String bodyEnd = String("--") + BOUNDARY + String("--\r\n");
-  size_t allLen = bodyNominal.length() + size_pic + bodyEnd.length();
-  String headerTxt = headerNominal(allLen);
-
-  if (!wificlient.connect(SERVER.c_str(), PORT))
-  {
-    return ("connection failed");
-  }
-
-  wificlient.print(headerTxt + bodyNominal);
-  Serial.print(headerTxt + bodyNominal);
-  wificlient.write(data_pic, size_pic);
-
-  wificlient.print("\r\n" + bodyEnd);
-  Serial.print("\r\n" + bodyEnd);
-
-  delay(20);
-  long tOut = millis() + TIMEOUT;
-  while (tOut > millis())
-  {
-    Serial.print(".");
-    delay(100);
-    if (wificlient.available())
-    {
-      serverRes = wificlient.readStringUntil('\r');
-      return (serverRes);
-    }
-    else
-    {
-      serverRes = "NOT RESPONSE";
-      return (serverRes);
-    }
-  }
-  // wificlient.stop();
-  return serverRes;
+  String data;
+  // data = F("POST /topup/response/?status=success&sn_device=5253252&token=33333 HTTP/1.1\r\n");
+  data = "POST /topup/response/status/?sn_device=" + String(sn) + " HTTP/1.1\r\n";
+  data += "cache-control: no-cache\r\n";
+  data += "Content-Type: multipart/form-data; boundary=";
+  data += BOUNDARY;
+  data += "\r\n";
+  data += "User-Agent: PostmanRuntime/6.4.1\r\n";
+  data += "Accept: */*\r\n";
+  data += "Host: ";
+  data += SERVER;
+  data += "\r\n";
+  data += "accept-encoding: gzip, deflate\r\n";
+  data += "Connection: keep-alive\r\n";
+  data += "content-length: ";
+  data += String(length);
+  data += "\r\n";
+  data += "\r\n";
+  return (data);
 }
 
-String sendImageNominal(char *filename)
+// String sendImageNominal(char *id, uint8_t *data_pic, size_t size_pic)
+// {
+//   String serverRes;
+//   String bodyNominal = body_Nominal();
+//   WiFiClient postClient;
+//   String bodyEnds = String("--") + BOUNDARY + String("--\r\n");
+//   size_t allLen = bodyNominal.length() + size_pic + bodyEnds.length();
+//   String headerTxt = headerNominal(id, allLen);
+
+//   if (!postClient.connect(SERVER.c_str(), PORT))
+//   {
+//     return ("connection failed");
+//   }
+
+//   postClient.print(headerTxt + bodyNominal);
+//   Serial.print(headerTxt + bodyNominal);
+//   postClient.write(data_pic, size_pic);
+
+//   postClient.print("\r\n" + bodyEnds);
+//   Serial.print("\r\n" + bodyEnds);
+
+//   delay(20);
+//   long tOut = millis() + TIMEOUT;
+//   while (tOut > millis())
+//   {
+//     Serial.print(".");
+//     delay(100);
+//     if (postClient.available())
+//     {
+//       serverRes = postClient.readStringUntil('\r');
+//       return (serverRes);
+//     }
+//     else
+//     {
+//       serverRes = "NOT RESPONSE";
+//       return (serverRes);
+//     }
+//   }
+//   // postClient.stop();
+//   return serverRes;
+// }
+
+String sendImageNominal(uint8_t *data_pic, size_t size_pic)
 {
-  String serverRes;
-  String bodyNominal = body_Nominal();
-  String bodyEnd = String("--") + BOUNDARY + String("--\r\n");
-  File myFile;
-  myFile = LittleFS.open(filename); // change to your file name
-  size_t filesize = myFile.size();
+  String getAll;
+  String getBody;
+  WiFiClient postClient;
 
-  size_t allLen = bodyNominal.length() + filesize + bodyEnd.length();
-  String headerTxt = headerNominal(allLen);
+  Serial.println("Connecting to server: " + SERVER);
 
-  if (!wificlient.connect(SERVER.c_str(), PORT))
+  if (postClient.connect(SERVER.c_str(), serverPort))
   {
-    return ("connection failed");
-  }
 
-  wificlient.print(headerTxt + bodyNominal);
-  Serial.print(headerTxt + bodyNominal);
-  while (myFile.available())
-    wificlient.write(myFile.read());
+    String serverRes;
+    String bodyNominal = body_Nominal();
+    WiFiClient postClient;
+    String bodyEnds = String("--") + BOUNDARY + String("--\r\n");
+    size_t allLen = bodyNominal.length() + size_pic + bodyEnds.length();
+    String headerTxt = headerNominal(idDevice, allLen);
 
-  wificlient.print("\r\n" + bodyEnd);
-  Serial.print("\r\n" + bodyEnd);
-
-  delay(20);
-  long tOut = millis() + TIMEOUT;
-  while (tOut > millis())
-  {
-    Serial.print(".");
-    delay(100);
-    if (wificlient.available())
+    if (!postClient.connect(SERVER.c_str(), PORT))
     {
-      serverRes = wificlient.readStringUntil('\r');
-      return (serverRes);
+      return ("connection failed");
     }
-    else
+
+    postClient.print(headerTxt + bodyNominal);
+    Serial.print(headerTxt + bodyNominal);
+
+    uint8_t *fbBuf = data_pic;
+    size_t fbLen = size_pic;
+    // CaptureToSpiffs("/nominal.jpg", fb->buf, fb->len);
+    for (size_t n = 0; n < fbLen; n = n + 1024)
     {
-      serverRes = "NOT RESPONSE";
-      return (serverRes);
+      if (n + 1024 < fbLen)
+      {
+        postClient.write(fbBuf, 1024);
+        fbBuf += 1024;
+      }
+      else if (fbLen % 1024 > 0)
+      {
+        size_t remainder = fbLen % 1024;
+        postClient.write(fbBuf, remainder);
+      }
     }
+
+    postClient.print("\r\n" + bodyEnds);
+    Serial.print("\r\n" + bodyEnds);
+
+    long tOut = millis() + TIMEOUT;
+    while (tOut > millis())
+    {
+      Serial.print(".");
+      delay(100);
+      if (postClient.available())
+      {
+        serverRes = postClient.readStringUntil('\r');
+        return (serverRes);
+      }
+      else
+      {
+        serverRes = "NOT RESPONSE";
+        return (serverRes);
+      }
+    }
+    // postClient.stop();
+    return serverRes;
   }
-  // wificlient.stop();
-  myFile.close();
-  return serverRes;
+  else
+    return String("NOT CONNECT");
 }
 
 String sendImageSaldo(char *token, uint8_t *data_pic, size_t size_pic)
 {
   String serverRes;
+  WiFiClient postClient;
   String bodySaldo = body_Saldo();
   String bodyEnd = String("--") + BOUNDARY + String("--\r\n");
   size_t allLen = bodySaldo.length() + size_pic + bodyEnd.length();
   String headerTxt = headerSaldo(token, allLen);
 
-  if (!wificlient.connect(SERVER.c_str(), PORT))
+  if (!postClient.connect(SERVER.c_str(), PORT))
   {
     return ("connection failed");
   }
 
-  wificlient.print(headerTxt + bodySaldo);
+  postClient.print(headerTxt + bodySaldo);
   Serial.print(headerTxt + bodySaldo);
-  wificlient.write(data_pic, size_pic);
+  postClient.write(data_pic, size_pic);
 
-  wificlient.print("\r\n" + bodyEnd);
+  postClient.print("\r\n" + bodyEnd);
   Serial.print("\r\n" + bodyEnd);
 
   delay(20);
@@ -1458,9 +1590,9 @@ String sendImageSaldo(char *token, uint8_t *data_pic, size_t size_pic)
   {
     Serial.print(".");
     delay(100);
-    if (wificlient.available())
+    if (postClient.available())
     {
-      serverRes = wificlient.readStringUntil('\r');
+      serverRes = postClient.readStringUntil('\r');
       return (serverRes);
     }
     else
@@ -1469,33 +1601,30 @@ String sendImageSaldo(char *token, uint8_t *data_pic, size_t size_pic)
       return (serverRes);
     }
   }
-  // wificlient.stop();
+  // postClient.stop();
   return serverRes;
 }
 
-String sendImageSaldo(char *filename, char *token)
+String sendImageStatusToken(char *sn, uint8_t *data_pic, size_t size_pic)
 {
   String serverRes;
-  String bodySaldo = body_Saldo();
+  WiFiClient postClient;
+  String bodySatus = body_StatusToken();
   String bodyEnd = String("--") + BOUNDARY + String("--\r\n");
-  File myFile;
-  myFile = LittleFS.open(filename); // change to your file name
-  size_t filesize = myFile.size();
+  size_t allLen = bodySatus.length() + size_pic + bodyEnd.length();
+  String headerTxt = headerStatusToken(sn, allLen);
 
-  size_t allLen = bodySaldo.length() + filesize + bodyEnd.length();
-  String headerTxt = headerSaldo(token, allLen);
-
-  if (!wificlient.connect(SERVER.c_str(), PORT))
+  if (!postClient.connect(SERVER.c_str(), PORT))
   {
     return ("connection failed");
   }
 
-  wificlient.print(headerTxt + bodySaldo);
-  Serial.print(headerTxt + bodySaldo);
-  while (myFile.available())
-    wificlient.write(myFile.read());
+  // MqttPublishStatus("SEND IMAGE STATUS TOKEN");
+  postClient.print(headerTxt + bodySatus);
+  Serial.print(headerTxt + bodySatus);
+  postClient.write(data_pic, size_pic);
 
-  wificlient.print("\r\n" + bodyEnd);
+  postClient.print("\r\n" + bodyEnd);
   Serial.print("\r\n" + bodyEnd);
 
   delay(20);
@@ -1504,9 +1633,9 @@ String sendImageSaldo(char *filename, char *token)
   {
     Serial.print(".");
     delay(100);
-    if (wificlient.available())
+    if (postClient.available())
     {
-      serverRes = wificlient.readStringUntil('\r');
+      serverRes = postClient.readStringUntil('\r');
       return (serverRes);
     }
     else
@@ -1515,109 +1644,175 @@ String sendImageSaldo(char *filename, char *token)
       return (serverRes);
     }
   }
-  // wificlient.stop();
-  myFile.close();
+  // postClient.stop();
   return serverRes;
+}
+
+void CaptureToSpiffs(String path, uint8_t *data_pic, size_t size_pic)
+{
+  if (!SPIFFS.begin())
+  {
+    Serial.println("SD Card Mount Failed");
+    return;
+  }
+
+  Serial.printf("Picture file name: %s\n", path.c_str());
+
+  File file = SPIFFS.open(path.c_str(), FILE_WRITE);
+  if (!file)
+  {
+    Serial.println("Failed to open file in writing mode");
+  }
+  else
+  {
+    file.write(data_pic, size_pic); // payload (image), payload length
+    Serial.printf("Saved file to path: %s\n", path.c_str());
+  }
+  file.close();
 }
 
 void TokenProcess(/*char *token*/)
 {
   if (received_msg and (strcmp(received_topic, topicREQToken) == 0) and received_length == 20)
   {
-
-    // if (strcmp(token, PrevToken) == 0)
-    // {
-    //   MqttCustomPublish(topicStatusSubs, "failed");
-    // }
-    // else
-    // {
+    status = Status::PROCCESS_TOKEN;
+    MqttPublishStatus("EXECUTING TOKEN");
     for (int i = 0; i < received_length; i++)
     {
-      char pyld = received_payload[i];
-      unsigned long timeNow;
-      unsigned long timeStart;
-      Serial.printf("CHAR KE %d data %c - ", i, pyld);
-      switch (pyld)
+
+      char chars = received_payload[i];
+      Serial.printf("%d ", i);
+      // MqttPublishStatus("SELENOID " + String(chars) + " ON");
+      switch (chars)
       {
       case '0':
-        Serial.printf("SELENOID %c ON\n", pyld);
-        // while (!SoundDetectShort())
-        // {
-        //   unsigned long timeStart = millis();
-        //   Serial.print(timeStart);
-        //   Serial.print(" - ");
-        //   Serial.println(timeNow);
-        //   Serial.println("WAITING RESPONSE FROM SOUND");
-        //   if (CheckTimeout(&timeNow, &timeStart))
-        //   {
-        //     Serial.printf("SELENOID %c OFF\n", pyld);
-        //     break;
-        //   }
-        // }
+
+        MqttPublishStatus("SELENOID " + String(chars) + " ON");
+
+        // MechanicTyping(10);
+        delay(2000);
         break;
+
       case '1':
-        Serial.printf("SELENOID %c ON\n", pyld);
+
+        MqttPublishStatus("SELENOID " + String(chars) + " ON");
+        // MechanicTyping(0);
+        delay(2000);
         break;
+
       case '2':
-        Serial.printf("SELENOID %c ON\n", pyld);
+
+        MqttPublishStatus("SELENOID " + String(chars) + " ON");
+        // MechanicTyping(1);
+        delay(2000);
         break;
       case '3':
-        Serial.printf("SELENOID %c ON\n", pyld);
+
+        MqttPublishStatus("SELENOID " + String(chars) + " ON");
+        // MechanicTyping(2);
+        delay(2000);
         break;
       case '4':
-        Serial.printf("SELENOID %c ON\n", pyld);
+
+        MqttPublishStatus("SELENOID " + String(chars) + " ON");
+        // MechanicTyping(3);
+        delay(2000);
         break;
       case '5':
-        Serial.printf("SELENOID %c ON\n", pyld);
+
+        MqttPublishStatus("SELENOID " + String(chars) + " ON");
+        // MechanicTyping(4);
+        delay(2000);
         break;
       case '6':
-        Serial.printf("SELENOID %c ON\n", pyld);
+
+        MqttPublishStatus("SELENOID " + String(chars) + " ON");
+        // MechanicTyping(5);
+        delay(2000);
         break;
       case '7':
-        Serial.printf("SELENOID %c ON\n", pyld);
+        MqttPublishStatus("SELENOID " + String(chars) + " ON");
+        // MechanicTyping(6);
+        delay(2000);
         break;
       case '8':
-        Serial.printf("SELENOID %c ON\n", pyld);
+        MqttPublishStatus("SELENOID " + String(chars) + " ON");
+        // MechanicTyping(7);
+        delay(2000);
         break;
       case '9':
-        Serial.printf("SELENOID %c ON\n", pyld);
+        MqttPublishStatus("SELENOID " + String(chars) + " ON");
+        // MechanicTyping(8);
+        delay(2000);
         break;
       default:
         break;
       }
     }
-    // }
+    // delay();
+    delay(delayStatus);
+    Serial.println("SOLENOID ENTER");
+    // MechanicEnter();
+    // delay(delayStatus);
     String res;
+
     camera_fb_t *fb = NULL;
-
     fb = esp_camera_fb_get();
+    esp_camera_fb_return(fb); // dispose the buffered image
+    fb = NULL;                // reset to capture errors
+    fb = esp_camera_fb_get(); // get fresh image
     if (!fb)
     {
       Serial.println("Camera capture failed");
       delay(1000);
       ESP.restart();
     }
-    // res = sendImageSaldo("/nominal.jpg", received_payload);
+    else
+    {
+      res = sendImageStatusToken(idDevice, fb->buf, fb->len);
+      Serial.println(res);
+      esp_camera_fb_return(fb);
+    }
 
-    res = sendImageSaldo(received_payload, fb->buf, fb->len);
-    esp_camera_fb_return(fb);
-
-    Serial.println(res);
-
-    delay(4000);
-
+    delay(delayNominal);
+    fb = NULL;
     fb = esp_camera_fb_get();
+    esp_camera_fb_return(fb); // dispose the buffered image
+    fb = NULL;                // reset to capture errors
+    fb = esp_camera_fb_get(); // get fresh image
     if (!fb)
     {
       Serial.println("Camera capture failed");
       delay(1000);
       ESP.restart();
     }
-    // res = sendImageNominal("/dummy.jpg");
-    res = sendImageNominal(fb->buf, fb->len);
+    else
+    {
+      res = sendImageNominal(fb->buf, fb->len);
+      Serial.println(res);
+      esp_camera_fb_return(fb);
+    }
 
-    esp_camera_fb_return(fb);
-    Serial.println(res);
+    delay(delaySaldo);
+    fb = NULL;
+    fb = esp_camera_fb_get();
+    esp_camera_fb_return(fb); // dispose the buffered image
+    fb = NULL;                // reset to capture errors
+    fb = esp_camera_fb_get(); // get fresh image
+    if (!fb)
+    {
+      Serial.println("Camera capture failed");
+      delay(1000);
+      ESP.restart();
+    }
+    else
+    {
+      res = sendImageSaldo(received_payload, fb->buf, fb->len);
+      Serial.println(res);
+      esp_camera_fb_return(fb);
+    }
+
+    Serial.println("TOKEN PROCESS END");
 
     received_msg = false;
   }
@@ -1629,41 +1824,48 @@ void setup()
   Serial.begin(115200);
   // MechanicInit();
   SettingsInit();
-  // KoneksiInit();
+  KoneksiInit();
+  WifiInit();
   CameraInit();
 
-  if (!LittleFS.begin(false /* false: Do not format if mount failed */))
+  if (!SPIFFS.begin(false /* false: Do not format if mount failed */))
   {
     Serial.println("Failed to mount LittleFS");
   }
 
   SoundInit();
-  WifiInit();
+  // MechanicInit();
   mqtt.setServer(mqttServer, 1883);
   mqtt.setCallback(callback);
 
   MqttTopicInit();
-  // pingTime = Alarm.timerRepeat(10, CheckPingServer); // timer for every 2 seconds
-  // pingTimeSend = Alarm.timerRepeat(30, CheckPingSend);
+  // timergagal.prepare(3000);
+  timer.prepare(5000);
+
+  Alarm.timerOnce(10, dummySignalSend);
   pingTimeSend = Alarm.timerRepeat(30, dummySignalSend);
 
   pinMode(33, OUTPUT);
   digitalWrite(33, LOW);
+  status = Status::IDLE;
 }
 
 void loop()
 {
-
-  if (!mqtt.connected())
+  if (!mqtt.connected() /*and status == Status::IDLE*/)
   {
     MqttReconnect();
   }
+  // if (status == Status::IDLE)
+  mqtt.loop();
 
   TokenProcess();
   GetKwhProcess();
-  DetectionLowToken();
 
-  // // MqttPublish(kirim)
-  mqtt.loop();
-  // Alarm.delay(1000);
+  DetectionLowToken();
+  // SoundDetectShort();
+
+  // OTASERVER.handleClient();
+
+  Alarm.delay(0);
 }
