@@ -87,12 +87,18 @@ Timeout timer;
 int delayStatus = 700;
 int delayNominal = 1700;
 int delaySaldo = 4000;
+int freqPeak = 182; // kantor 182, pak ferdi 186
 #endif
 #ifdef HEXING
 int delayStatus = 1100;
 int delayNominal = 5200;
 int delaySaldo = 11000;
+int freqPeak = 117;
 #endif
+
+#define TIMEOUT_SUARA 400
+
+int delaySolenoid = 1000;
 
 enum class Status : uint8_t
 {
@@ -111,11 +117,6 @@ const char *configFile = "/config.json";
 char productName[16] = "TOKEN-ONLINE_";
 char wifissidbuff[20];
 char wifipassbuff[20];
-const char *wifissid = "MGI-MNC";
-const char *wifipass = "#neurixmnc#";
-
-// const char *wifissid = "NEURIXII";
-// const char *wifipass = "#neurix123#";
 
 char idDevice[9] = "007";
 char bluetooth_name[sizeof(productName) + sizeof(idDevice)];
@@ -124,10 +125,11 @@ const char *MqttUser = "das";
 const char *MqttPass = "mgi2022";
 
 char topicREQToken[50];
-char topicRSPToken[50];
-char topicRSPSound[50];
+char topicREQAlarm[50];
+char topicRSPSoundStatus[50];
+char topicRSPSoundPeak[50];
+char topicRSPSoundCnt[50];
 char topicREQView[50];
-char topicRSPView[50];
 char topicRSPSignal[50];
 char topicRSPStatus[50];
 
@@ -160,8 +162,10 @@ static unsigned int bell = 0;
 static unsigned int hexingShort = 0;
 static unsigned int hexingLong = 0;
 static unsigned int itronShortFast = 0;
+static unsigned int itronShortFast2 = 0;
 static unsigned int itronBerhasilKantor = 0;
-static unsigned int itronGagalKantor = 0;
+static unsigned int sounditronGagalKantor = 0;
+static unsigned int soundValidasi = 0;
 static unsigned long ts = millis();
 static unsigned long last = micros();
 static unsigned int sum = 0;
@@ -170,10 +174,16 @@ static unsigned int mx = 0;
 static unsigned int cnts = 0;
 static unsigned long lastTrigger[2] = {0, 0};
 
+int soundValidasiCnt;
+
 boolean detectShort = false;
 boolean detectLong = false;
 int detectLongCnt;
 int detectShortCnt;
+
+bool prevAlarmStatus = false;
+bool AlarmStatus = false;
+bool timeAlarm = false;
 
 int cnt = 0;
 
@@ -258,26 +268,27 @@ bool SettingsInit()
   int response;
   settings.readSettings(configFile);
   strcpy(idDevice, settings.getChar("device.id"));
-  Serial.println(idDevice);
-  Serial.println(settings.getChar("bluetooth.name"));
+  Serial.println("**BOOT**");
+  Serial.println("**SETTING INIT START**");
+  Serial.printf("SN DEVICE: %s\n", idDevice);
+  Serial.printf("BT NAME: %s\n", settings.getChar("bluetooth.name"));
 
   if (strlen(settings.getChar("bluetooth.name")) == 0)
   {
-    Serial.println(" ZERO BT NAME");
+    Serial.printf("BT NAME: NULL\n", settings.getChar("bluetooth.name"));
     response = settings.setChar("bluetooth.name", strcat(productName, idDevice));
     settings.writeSettings(configFile);
+    Serial.println("**RESTART**");
     ESP.restart();
   }
   else
     strcpy(bluetooth_name, settings.getChar("bluetooth.name"));
 
-  Serial.println(idDevice);
-  Serial.println(bluetooth_name);
   strcpy(wifissidbuff, settings.getChar("wifi.ssid"));
   strcpy(wifipassbuff, settings.getChar("wifi.pass"));
-  Serial.println(wifissidbuff);
-  Serial.println(wifipassbuff);
-
+  Serial.printf("WIFI SSID: %s\n", wifissidbuff);
+  Serial.printf("WIFI PASS: %s\n", wifipassbuff);
+  Serial.println("**SETTING INIT COMPLETE**");
   return true;
 }
 
@@ -395,7 +406,7 @@ void dummySignalSend()
 
 void BluetoothCallback(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)
 {
-  char serialBTBuffer[50];
+  char BTBuffer[50];
 
   if (event == ESP_SPP_SRV_OPEN_EVT)
   {
@@ -434,8 +445,51 @@ void KoneksiInit()
   //     0);
 }
 
+void WiFiStationConnected(WiFiEvent_t event, WiFiEventInfo_t info)
+{
+  Serial.println("Connected to AP successfully!");
+}
+
+void WiFiGotIP(WiFiEvent_t event, WiFiEventInfo_t info)
+{
+  Serial.println("WiFi connected");
+  Serial.println("IP address: ");
+  Serial.println(WiFi.localIP());
+}
+
+void WiFiStationDisconnected(WiFiEvent_t event, WiFiEventInfo_t info)
+{
+  Serial.println("Disconnected from WiFi access point");
+  Serial.print("WiFi lost connection. Reason: ");
+  Serial.println(info.wifi_sta_disconnected.reason);
+  Serial.println("Trying to Reconnect");
+  WiFi.begin(wifissidbuff, wifipassbuff);
+}
+
+void onWifiEvent(WiFiEvent_t event)
+{
+  switch (event)
+  {
+  case WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_CONNECTED:
+    Serial.println("Connected or reconnected to WiFi");
+    break;
+  case WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
+    Serial.println("WiFi Disconnected. Enabling WiFi autoconnect");
+    WiFi.setAutoReconnect(true);
+    break;
+  default:
+    break;
+  }
+}
 void WifiInit()
 {
+  Serial.println("**WIFI INIT START**");
+  WiFi.disconnect(true);
+  delay(1000);
+  // WiFi.onEvent(WiFiStationConnected, WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_CONNECTED);
+  // WiFi.onEvent(WiFiGotIP, WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_GOT_IP);
+  // WiFi.onEvent(WiFiStationDisconnected, WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
+  WiFi.onEvent(onWifiEvent);
   if (strcmp(wifipassbuff, "NULL") == 0)
     WiFi.begin(wifissidbuff, NULL);
   else
@@ -446,22 +500,37 @@ void WifiInit()
     Serial.print(".");
     if (millis() - start_wifi_millis > wifi_timeout)
     {
-      WiFi.disconnect(true, true);
+      WiFi.disconnect(true);
+      esp_restart();
+      // delay(1000);
+      // WiFi.begin(wifissidbuff, wifipassbuff);
     }
   }
-  // WiFi.setAutoReconnect(true);
-  // WiFi.persistent(true);
-  Serial.println("WifiInit()...Successfull");
+
   Serial.print("WiFi connected to");
   Serial.print(wifissidbuff);
   Serial.print(" IP: ");
   Serial.println(WiFi.localIP());
+  Serial.println("**WIFI INIT COMPLETE**");
 
   // OTASERVER.on("/", []()
   //              { OTASERVER.send(200, "text/plain", "Hi! I am ESP8266."); });
 
   // ElegantOTA.begin(&OTASERVER); // Start ElegantOTA
   // OTASERVER.begin();
+}
+
+void WifiReconnect()
+{
+  if (WiFi.status() != WL_CONNECTED)
+  {
+    WiFi.reconnect();
+    // WiFi.disconnect(true);
+    delay(1000);
+    // WiFi.begin(wifissidbuff, wifipassbuff);
+    // WiFi.reconnect();
+    return;
+  }
 }
 
 void MqttCustomPublish(char *path, String msg);
@@ -1053,6 +1122,104 @@ void SoundLooping()
   //   Serial.println("Detect Short");
 }
 
+void callback(char *topic, byte *payload, unsigned int length)
+{
+  strcpy(received_topic, topic);
+  memcpy(received_payload, payload, length);
+  received_msg = true;
+  received_length = length;
+  Serial.println("void callback()");
+  Serial.printf("received_topic %s received_length = %d \n", received_topic, received_length);
+  Serial.printf("received_payload %s \n", received_payload);
+  Serial.println("void callback()");
+}
+
+bool MqttConnect()
+{
+  static const char alphanum[] = "0123456789"
+                                 "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                                 "abcdefghijklmnopqrstuvwxyz"; // For random generation of client ID.
+  char clientId[9];
+  uint8_t retry = 3;
+  while (!mqtt.connected())
+  {
+    Serial.println(String("Attempting MQTT broker:") + mqttServer);
+
+    if (mqtt.connect(mqttChannel, MqttUser, MqttPass))
+    {
+      Serial.println("Established:" + String(clientId));
+      mqtt.subscribe(topicREQToken);
+      mqtt.subscribe(topicREQView);
+      return true;
+    }
+    else
+    {
+      Serial.print("failed, rc=");
+      Serial.print(mqtt.state());
+      Serial.println(" try again in 5 seconds");
+      if (!--retry)
+        break;
+      // delay(3000);
+    }
+  }
+  return false;
+}
+
+void MqttCustomPublish(char *path, String msg)
+{
+  mqtt.publish(path, msg.c_str());
+}
+
+void MqttPublishStatus(String msg)
+{
+  MqttCustomPublish(topicRSPStatus, msg);
+}
+
+void MqttTopicInit()
+{
+  // sprintf(topicREQToken, "%s/%s/%s/%s", mqttChannel, "request", idDevice, "token");
+  sprintf(topicREQToken, "%s/%s/%s", mqttChannel, "request", idDevice);
+  sprintf(topicREQView, "%s/%s/%s/%s", mqttChannel, "request", "view", idDevice);
+  sprintf(topicRSPSignal, "%s/%s/%s/%s", mqttChannel, "respond", idDevice, "signal");
+  sprintf(topicRSPStatus, "%s/%s/%s/%s", mqttChannel, "respond", idDevice, "debug");
+  sprintf(topicRSPSoundStatus, "%s/%s/%s/%s", mqttChannel, "respond", idDevice, "sound/status");
+  sprintf(topicRSPSoundPeak, "%s/%s/%s/%s", mqttChannel, "respond", idDevice, "sound/peak");
+  sprintf(topicRSPSoundCnt, "%s/%s/%s/%s", mqttChannel, "respond", idDevice, "sound/cnt");
+  sprintf(topicREQAlarm, "%s/%s/%s/%s", mqttChannel, "request", idDevice, "alarm");
+
+  // Serial.printf("%s\n", topicREQToken);
+  // Serial.printf("%s\n", topicREQView);
+  // Serial.printf("%s\n", topicRSPSignal);
+  // Serial.printf("%s\n", topicRSPStatus);
+}
+
+/* *********************************** MQTT ************************* */
+void MqttReconnect()
+{
+  // Loop until we're reconnected
+  while (!mqtt.connected())
+  {
+    Serial.print("Attempting MQTT connection...");
+    // Attempt to connect
+    if (mqtt.connect("monTok"))
+    {
+      Serial.println("connected");
+      MqttPublishStatus("CONNECTED MQTT");
+      mqtt.subscribe(topicREQAlarm);
+      mqtt.subscribe(topicREQToken);
+      mqtt.subscribe(topicREQView);
+    }
+    else
+    {
+      Serial.print("failed, rc=");
+      Serial.print(mqtt.state());
+      Serial.println(" try again in 5 seconds");
+      // Wait 5 seconds before retrying
+      delay(5000);
+    }
+  }
+}
+
 bool SoundDetectLong()
 {
   SoundLooping();
@@ -1136,30 +1303,23 @@ bool SoundDetectShort()
 bool SoundDetectShortItron()
 {
   SoundLooping();
-  bool detectedLong = detectFrequency(&hexingLong, 22, SoundPeak, 117, 243, true);
-  // bool detectedShort = detectFrequency(&hexingShort, 2, SoundPeak, 117, 243, true);
-  bool detectedShortItronFast = detectFrequency(&itronShortFast, 6, SoundPeak, 182, 199, true);
 
-  // Serial.printf("%d %d %d %d %d\n", SoundPeak, detectedLong, detectedShortItronFast, detectLongCnt, detectShortCnt);
-  if (detectedShortItronFast and (detectShortCnt > 100 /*and detectShortCnt < 35)*/))
+  bool detectedShortItronFast2 = detectFrequency(&itronShortFast2, 6, SoundPeak, 186, 190, true);
+  bool detectedShortItronFast = detectFrequency(&itronShortFast, 6, SoundPeak, 182, 190, true);
+
+  Serial.printf("%d %d %d %d %d\n", SoundPeak, detectedShortItronFast, detectedShortItronFast2, detectShortCnt);
+  if (detectedShortItronFast or detectedShortItronFast2 and (detectShortCnt > 10 /*and detectShortCnt < 35)*/))
   {
-    MqttCustomPublish(topicRSPSound, "DETECTED SHORT BEEP");
-    Serial.println("DETECTED SHORT BEEP");
+    // MqttCustomPublish(topicRSPSoundStatus, "DETECTED SHORT BEEP");
+    // Serial.println("DETECTED SHORT BEEP");
     cntDetected = 0;
     detectShortCnt = 0;
-    detectLongCnt = 0;
     return true;
   }
   else
   {
-    // if (detectedLong)
-    // {
-    //   cntDetected++;
-    //   detectLongCnt++;
-    // }
-    // Serial.println("DETEK LONG BEEP");
-    // MqttCustomPublish("sound", "ELSE DETECTED SHORT BEEP");
-    if (detectedShortItronFast) // and !detectLong)
+
+    if (detectedShortItronFast or detectedShortItronFast2) // and !detectLong)
     {
       cntDetected++;
       detectShortCnt++;
@@ -1168,10 +1328,8 @@ bool SoundDetectShortItron()
     {
       cntDetected = 0;
       detectShortCnt = 0;
-      detectLongCnt = 0;
     }
-    // MqttCustomPublish("DeteckShort", String(detectedShortItronFast));
-    // MqttCustomPublish("soundShortcnt", String(SoundPeak));
+    // MqttCustomPublish(topicRSPSoundPeak, String(SoundPeak));
     return false;
   }
 }
@@ -1187,146 +1345,126 @@ bool SoundDetectShortItronKantorGagal()
   boolean state = false;
 
   SoundLooping();
-  bool detectedShortGagal = detectFrequency(&itronGagalKantor, 3, SoundPeak, 169, 192, true);
+  bool detectedShortGagal = detectFrequency(&sounditronGagalKantor, 3, SoundPeak, 169, 192, true);
   // bool detectedShortItronFast = detectFrequency(&itronShortFast, 6, SoundPeak, 168, 199, true);
 
   return detectedShortGagal;
   // }
 }
 
-void DetectGagalItronKantor()
-{
-  if (SoundDetectShortItron())
-  {
-    mqtt.publish("sound", "DETECT KANTOR");
-    Serial.println("DETECK LOW TOKEN");
-    Serial.println("SEND NOTIFICATION");
-  }
-}
-
-void callback(char *topic, byte *payload, unsigned int length)
-{
-  strcpy(received_topic, topic);
-  memcpy(received_payload, payload, length);
-  received_msg = true;
-  received_length = length;
-  Serial.println("void callback()");
-  Serial.printf("received_topic %s received_length = %d \n", received_topic, received_length);
-  Serial.printf("received_payload %s \n", received_payload);
-  Serial.println("void callback()");
-}
-
-bool MqttConnect()
-{
-  static const char alphanum[] = "0123456789"
-                                 "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-                                 "abcdefghijklmnopqrstuvwxyz"; // For random generation of client ID.
-  char clientId[9];
-  uint8_t retry = 3;
-  while (!mqtt.connected())
-  {
-    Serial.println(String("Attempting MQTT broker:") + mqttServer);
-
-    if (mqtt.connect(mqttChannel, MqttUser, MqttPass))
-    {
-      Serial.println("Established:" + String(clientId));
-      mqtt.subscribe(topicREQToken);
-      mqtt.subscribe(topicREQView);
-      return true;
-    }
-    else
-    {
-      Serial.print("failed, rc=");
-      Serial.print(mqtt.state());
-      Serial.println(" try again in 5 seconds");
-      if (!--retry)
-        break;
-      // delay(3000);
-    }
-  }
-  return false;
-}
-
-void MqttCustomPublish(char *path, String msg)
-{
-  mqtt.publish(path, msg.c_str());
-}
-
-void MqttPublishStatus(String msg)
-{
-  MqttCustomPublish(topicRSPStatus, msg);
-}
-
-void MqttTopicInit()
-{
-  // sprintf(topicREQToken, "%s/%s/%s/%s", mqttChannel, "request", idDevice, "token");
-  sprintf(topicREQToken, "%s/%s/%s", mqttChannel, "request", idDevice);
-  sprintf(topicREQView, "%s/%s/%s/%s", mqttChannel, "request", "view", idDevice);
-  sprintf(topicRSPToken, "%s/%s/%s/%s", mqttChannel, "respond", idDevice, "token");
-  sprintf(topicRSPView, "%s/%s/%s/%s", mqttChannel, "respond", idDevice, "view");
-  sprintf(topicRSPSignal, "%s/%s/%s/%s", mqttChannel, "respond", idDevice, "signal");
-  sprintf(topicRSPStatus, "%s/%s/%s/%s", mqttChannel, "respond", idDevice, "debug");
-  sprintf(topicRSPSound, "%s/%s/%s/%s", mqttChannel, "respond", idDevice, "sound");
-
-  Serial.printf("%s\n", topicREQToken);
-  Serial.printf("%s\n", topicREQView);
-  Serial.printf("%s\n", topicRSPSignal);
-  Serial.printf("%s\n", topicRSPStatus);
-  Serial.println(topicRSPToken);
-  Serial.println(topicRSPView);
-}
-
-/* *********************************** MQTT ************************* */
-void MqttReconnect()
-{
-  // Loop until we're reconnected
-  while (!mqtt.connected())
-  {
-    Serial.print("Attempting MQTT connection...");
-    // Attempt to connect
-    if (mqtt.connect("monTok"))
-    {
-      Serial.println("connected");
-      MqttPublishStatus("CONNECTED MQTT");
-      mqtt.subscribe(topicREQToken);
-      mqtt.subscribe(topicREQView);
-    }
-    else
-    {
-      Serial.print("failed, rc=");
-      Serial.print(mqtt.state());
-      Serial.println(" try again in 5 seconds");
-      // Wait 5 seconds before retrying
-      delay(5000);
-    }
-  }
-}
-
 bool DetectionLowToken()
 {
+  // if (SoundDetectShortItron())
+  // {
+  //   timer.start();
+  //   counter++;
+  //   Serial.printf("COUNTER SHORT DETECT : %d\n", counter);
+  //   // MqttCustomPublish(topicRSPSoundStatus, "COUNTER SOUND " + String(counter));
+  // }
+  // else if (timer.time_over())
+  // {
+  //   // Serial.print("TIMEOUT...");
+  //   // Serial.println("RESET");
+  //   counter = 0;
+  // }
+
+  // if (/* timer.time_over()  and */ counter > 7)
+  // {
+  //   MqttCustomPublish(topicRSPSoundStatus, "SEND NOTIFICATION SOUND");
+  //   // sendNotifSaldo(idDevice);
+  //   // Serial.println("DETECK LOW TOKEN");
+  //   Serial.println("SEND NOTIFICATION");
+  //   counter = 0;
+  // }
+  // return true;
+
+  Serial.println(prevAlarmStatus);
+  Serial.println(AlarmStatus);
   if (SoundDetectShortItron())
   {
-    timer.start();
+    timer.start(2500);
+    prevAlarmStatus = true;
     counter++;
     Serial.printf("COUNTER SHORT DETECT : %d\n", counter);
-    MqttCustomPublish(topicRSPSound, "COUNTER SOUND " + String(counter));
+    MqttCustomPublish(topicRSPSoundPeak, String(SoundPeak));
+    MqttCustomPublish(topicRSPSoundCnt, String(counter));
+    // MqttCustomPublish(topicRSPSoundStatus, "COUNTER SOUND " + String(counter));
   }
   else if (timer.time_over())
   {
     // Serial.print("TIMEOUT...");
     // Serial.println("RESET");
+    AlarmStatus = false;
+    prevAlarmStatus = false;
     counter = 0;
   }
-
-  if (/* timer.time_over()  and */ counter > 13)
+  if (counter > 3)
   {
-    MqttCustomPublish(topicRSPSound, "SEND NOTIFICATION SOUND");
+    AlarmStatus = true;
+  }
+
+  if ((AlarmStatus and timeAlarm) or (prevAlarmStatus and timeAlarm))
+  {
+    MqttCustomPublish(topicRSPSoundStatus, "SEND NOTIFICATION SOUND");
     sendNotifSaldo(idDevice);
     Serial.println("DETECK LOW TOKEN");
     Serial.println("SEND NOTIFICATION");
     counter = 0;
+    AlarmStatus = false;
+    prevAlarmStatus = false;
+    timeAlarm = false;
   }
-  return true;
+  return false;
+}
+
+int SoundDetectValidasi()
+{
+  int returnValue;
+  long startTimer = millis();
+  while (millis() < startTimer + TIMEOUT_SUARA)
+  {
+    SoundLooping();
+    bool detectedGagal = detectFrequency(&soundValidasi, 2, SoundPeak, freqPeak, 196, true);
+
+    MqttCustomPublish(topicRSPSoundPeak, String(SoundPeak));
+    MqttCustomPublish(topicRSPSoundCnt, String(cntDetected));
+    if (detectedGagal)
+    {
+      cntDetected++;
+    }
+    else
+    {
+      soundValidasiCnt = cntDetected;
+      // Serial.println(detectCntItronGagal);
+      cntDetected = 0;
+      // detectCntItronGagal = 0;
+      // Serial.println("DETECK INVALID");
+      // break;
+    }
+    returnValue = soundValidasiCnt;
+  }
+  Serial.println("Timeout");
+  return cntDetected;
+}
+
+void OutputSoundValidasi(int val)
+{
+  if (val > 41)
+  {
+    Serial.println("DETECK GAGAL");
+    MqttCustomPublish(topicRSPSoundStatus, "VALIDASI SUARA GAGAL");
+  }
+
+  else if (val != 0 && val < 40)
+  {
+    Serial.println("DETECK BENAR");
+    MqttCustomPublish(topicRSPSoundStatus, "VALIDASI SUARA BENAR");
+  }
+  else
+  {
+    Serial.println("DETECK INVALID");
+    MqttCustomPublish(topicRSPSoundStatus, "VALIDASI SUARA INVALID");
+  }
 }
 
 void GetKwhProcess()
@@ -1337,7 +1475,6 @@ void GetKwhProcess()
     MqttPublishStatus("REQUESTING BALANCE");
     Serial.println("GET_KWH");
     Serial.println(sendPhotoViewKWH(idDevice));
-    // MqttCustomPublish(topicRSPView, "gwtkwh-success");
     received_msg = false;
     status = Status::IDLE;
   }
@@ -1671,6 +1808,13 @@ void CaptureToSpiffs(String path, uint8_t *data_pic, size_t size_pic)
   file.close();
 }
 
+void ReceiveAlarm(/*char *token*/)
+{
+  if (received_msg and (strcmp(received_topic, topicREQAlarm) == 0))
+  {
+  }
+}
+
 void TokenProcess(/*char *token*/)
 {
   if (received_msg and (strcmp(received_topic, topicREQToken) == 0) and received_length == 20)
@@ -1690,71 +1834,75 @@ void TokenProcess(/*char *token*/)
         MqttPublishStatus("SELENOID " + String(chars) + " ON");
 
         // MechanicTyping(10);
-        delay(2000);
+        delay(delaySolenoid);
         break;
 
       case '1':
 
         MqttPublishStatus("SELENOID " + String(chars) + " ON");
         // MechanicTyping(0);
-        delay(2000);
+        delay(delaySolenoid);
         break;
 
       case '2':
 
         MqttPublishStatus("SELENOID " + String(chars) + " ON");
         // MechanicTyping(1);
-        delay(2000);
+        delay(delaySolenoid);
         break;
       case '3':
 
         MqttPublishStatus("SELENOID " + String(chars) + " ON");
         // MechanicTyping(2);
-        delay(2000);
+        delay(delaySolenoid);
         break;
       case '4':
 
         MqttPublishStatus("SELENOID " + String(chars) + " ON");
         // MechanicTyping(3);
-        delay(2000);
+        delay(delaySolenoid);
         break;
       case '5':
 
         MqttPublishStatus("SELENOID " + String(chars) + " ON");
         // MechanicTyping(4);
-        delay(2000);
+        delay(delaySolenoid);
         break;
       case '6':
 
         MqttPublishStatus("SELENOID " + String(chars) + " ON");
         // MechanicTyping(5);
-        delay(2000);
+        delay(delaySolenoid);
         break;
       case '7':
         MqttPublishStatus("SELENOID " + String(chars) + " ON");
         // MechanicTyping(6);
-        delay(2000);
+        delay(delaySolenoid);
         break;
       case '8':
         MqttPublishStatus("SELENOID " + String(chars) + " ON");
         // MechanicTyping(7);
-        delay(2000);
+        delay(delaySolenoid);
         break;
       case '9':
         MqttPublishStatus("SELENOID " + String(chars) + " ON");
         // MechanicTyping(8);
-        delay(2000);
+        delay(delaySolenoid);
         break;
       default:
         break;
       }
     }
-    // delay();
+    // MechanicEnter();
+    delay(delaySolenoid);
+    MqttPublishStatus("SELENOID ENTER ON");
     delay(delayStatus);
-    Serial.println("SOLENOID ENTER");
+
     // MechanicEnter();
     // delay(delayStatus);
     String res;
+
+    OutputSoundValidasi(SoundDetectValidasi());
 
     camera_fb_t *fb = NULL;
     fb = esp_camera_fb_get();
@@ -1813,12 +1961,23 @@ void TokenProcess(/*char *token*/)
     }
 
     Serial.println("TOKEN PROCESS END");
-
     received_msg = false;
+    status = Status::IDLE;
   }
 }
 
+void enableTimer()
+{
+  timeAlarm = true;
+}
+
+void disableTimer()
+{
+  timeAlarm = false;
+}
+
 bool send = false;
+int timeEnableAlarm = 60;
 void setup()
 {
   Serial.begin(115200);
@@ -1840,10 +1999,12 @@ void setup()
 
   MqttTopicInit();
   // timergagal.prepare(3000);
-  timer.prepare(5000);
+  // timer.prepare(5000);
 
   Alarm.timerOnce(10, dummySignalSend);
   pingTimeSend = Alarm.timerRepeat(30, dummySignalSend);
+  Alarm.timerRepeat(timeEnableAlarm, enableTimer);
+  Alarm.timerRepeat(timeEnableAlarm + 2, disableTimer);
 
   pinMode(33, OUTPUT);
   digitalWrite(33, LOW);
@@ -1852,20 +2013,19 @@ void setup()
 
 void loop()
 {
+  // WifiReconnect();
   if (!mqtt.connected() /*and status == Status::IDLE*/)
   {
     MqttReconnect();
   }
-  // if (status == Status::IDLE)
-  mqtt.loop();
+  if (status == Status::IDLE)
+  {
+    mqtt.loop();
+    DetectionLowToken();
+  }
 
   TokenProcess();
   GetKwhProcess();
-
-  DetectionLowToken();
-  // SoundDetectShort();
-
-  // OTASERVER.handleClient();
 
   Alarm.delay(0);
 }
