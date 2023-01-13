@@ -25,6 +25,20 @@
 #include <FS.h>
 #include <SPIFFS.h>
 
+#include <TaskScheduler.h>
+
+#define WIFI_CONNECT_INTERVAL 5000  // Connection retry interval in milliseconds
+#define WIFI_WATCHDOG_INTERVAL 5000 // Wi-Fi watchdog interval in milliseconds
+
+// Callback methods prototypes
+void wifi_connect_cb();
+void wifi_watchdog_cb();
+// Tasks
+Task wifi_connect_task(WIFI_CONNECT_INTERVAL, TASK_FOREVER, &wifi_connect_cb);
+Task wifi_watchdog_task(WIFI_WATCHDOG_INTERVAL, TASK_FOREVER, &wifi_watchdog_cb);
+// Task runner
+Scheduler wifiReconRunner;
+
 AlarmId pingTime;
 AlarmId pingTimeSend;
 Adafruit_MCP23017 mcp;
@@ -77,17 +91,18 @@ SettingsManager settings;
 BluetoothSerial SerialBT;
 WiFiClient wificlient;
 PubSubClient mqtt(wificlient);
-// WebServer OTASERVER(80);
+
 IPAddress mqttServer(203, 194, 112, 238);
 Timeout timergagal;
 Timeout timer;
+Timeout TimeKwhAlarm;
 #define ITRON
 // #define HEXING
 #ifdef ITRON
 int delayStatus = 700;
 int delayNominal = 1700;
 int delaySaldo = 4000;
-int freqPeak = 182; // kantor 182, pak ferdi 186
+int freqPeak = 186; // kantor 182, pak ferdi 186
 #endif
 #ifdef HEXING
 int delayStatus = 1100;
@@ -96,9 +111,12 @@ int delaySaldo = 11000;
 int freqPeak = 117;
 #endif
 
-#define TIMEOUT_SUARA 400
+#define TIMEOUT_SUARA 600
 
 int delaySolenoid = 1000;
+long validasiStartTimer;
+long afterSolenoid;
+long TimeKwhAlarmNow;
 
 enum class Status : uint8_t
 {
@@ -106,17 +124,30 @@ enum class Status : uint8_t
   IDLE,
   GET_KWH,
   PROCCESS_TOKEN,
-  SEND_IMAGE_SALDO,
-  SEND_IMAGE_NOMINAL,
-  NOTIF_LOW_SALDO,
+  PROCCESS_TOKEN_RECORD_SOUND,
+  PROCCESS_TOKEN_CAPTURE_STATUS,
+  PROCCESS_TOKEN_CAPTURE_NOMINAL,
+  PROCCESS_TOKEN_CAPTURE_SALDO,
+  NOTIF_LOW_SALDO
 };
 
 Status status = Status::NONE;
 
+bool TokenStateStatus = false;
+bool TokenStateSoundRec = false;
+bool TokenStateNominal = false;
+bool TokenStateSaldo = false;
+
 const char *configFile = "/config.json";
 char productName[16] = "TOKEN-ONLINE_";
+// SETTTING BUFF
 char wifissidbuff[20];
 char wifipassbuff[20];
+int kwhtimestatbuff;
+int kwhtimenomibuff;
+int kwhfreqbuff;
+int kwhalarmbuff;
+// SETTING BUFF
 
 char idDevice[9] = "007";
 char bluetooth_name[sizeof(productName) + sizeof(idDevice)];
@@ -139,11 +170,8 @@ char NowToken[21];
 long start_wifi_millis;
 long wifi_timeout = 10000;
 long tOut;
-int cntDetected;
-int cntLoss;
 
-unsigned int SoundPeak;
-
+// VARIABLE SOUND DETECTION
 #define SAMPLES 1024
 const i2s_port_t I2S_PORT = I2S_NUM_1;
 const int BLOCK_SIZE = SAMPLES;
@@ -180,6 +208,11 @@ boolean detectShort = false;
 boolean detectLong = false;
 int detectLongCnt;
 int detectShortCnt;
+int cntDetected;
+int cntLoss;
+
+unsigned int SoundPeak;
+// VARIABLE SOUND DETECTION
 
 bool prevAlarmStatus = false;
 bool AlarmStatus = false;
@@ -198,8 +231,10 @@ enum ENUM_KONEKSI
 
 enum ENUM_KONEKSI KoneksiStage = NONE;
 
-char received_topic[128];
-char received_payload[128];
+const int payloadSize = 100;
+const int topicSize = 128;
+char received_topic[topicSize];
+char received_payload[payloadSize];
 unsigned int received_length;
 bool received_msg = false;
 
@@ -234,6 +269,141 @@ char *strData = NULL; // this is allocated in separate and needs to be free( ) e
 
 void MqttCustomPublish(char *path, String msg);
 void MqttPublishStatus(String msg);
+void WifiInit();
+
+// Wi-Fi events
+void _wifi_event(WiFiEvent_t event)
+{
+  switch (event)
+  {
+  case SYSTEM_EVENT_WIFI_READY:
+    // Serial.print(PSTR("[Wi-Fi] Event: Wi-Fi interface ready\n"));
+    break;
+  case SYSTEM_EVENT_SCAN_DONE:
+    // Serial.print(PSTR("[Wi-Fi] Event: Completed scan for access points\n"));
+    break;
+  case SYSTEM_EVENT_STA_START:
+    // Serial.print(PSTR("[Wi-Fi] Event: Wi-Fi client started\n"));
+    break;
+  case SYSTEM_EVENT_STA_STOP:
+    // Serial.print(PSTR("[Wi-Fi] Event: Wi-Fi clients stopped\n"));
+    break;
+  case SYSTEM_EVENT_STA_CONNECTED:
+    // Serial.printf(PSTR("[Wi-Fi] Event: Connected to access point: %s \n"), WiFi.localIP().toString().c_str());
+    wifi_connect_task.disable();
+    break;
+  case SYSTEM_EVENT_STA_DISCONNECTED:
+    // Serial.print(PSTR("[Wi-Fi] Event: Not connected to Wi-Fi network\n"));
+    wifi_connect_task.enable();
+    break;
+  case SYSTEM_EVENT_STA_AUTHMODE_CHANGE:
+    // Serial.print(PSTR("[Wi-Fi] Event: Authentication mode of access point has changed\n"));
+    break;
+  case SYSTEM_EVENT_STA_GOT_IP:
+    // Serial.printf(PSTR("[Wi-Fi] Event: Obtained IP address: %s\n"), WiFi.localIP().toString().c_str());
+    wifi_watchdog_task.enable();
+    break;
+  case SYSTEM_EVENT_STA_LOST_IP:
+    // Serial.print(PSTR("[Wi-Fi] Event: Lost IP address and IP address is reset to 0\n"));
+    break;
+  case SYSTEM_EVENT_STA_WPS_ER_SUCCESS:
+    // Serial.print(PSTR("[Wi-Fi] Event: Wi-Fi Protected Setup (WPS): succeeded in enrollee mode\n"));
+    break;
+  case SYSTEM_EVENT_STA_WPS_ER_FAILED:
+    // Serial.print(PSTR("[Wi-Fi] Event: Wi-Fi Protected Setup (WPS): failed in enrollee mode\n"));
+    break;
+  case SYSTEM_EVENT_STA_WPS_ER_TIMEOUT:
+    // Serial.print(PSTR("[Wi-Fi] Event: Wi-Fi Protected Setup (WPS): timeout in enrollee mode\n"));
+    break;
+  case SYSTEM_EVENT_STA_WPS_ER_PIN:
+    // Serial.print(PSTR("[Wi-Fi] Event: Wi-Fi Protected Setup (WPS): pin code in enrollee mode\n"));
+    break;
+  case SYSTEM_EVENT_AP_START:
+    // Serial.print(PSTR("[Wi-Fi] Event: Wi-Fi access point started\n"));
+    break;
+  case SYSTEM_EVENT_AP_STOP:
+    // Serial.print(PSTR("[Wi-Fi] Event: Wi-Fi access point  stopped\n"));
+    break;
+  case SYSTEM_EVENT_AP_STACONNECTED:
+    // Serial.print(PSTR("[Wi-Fi] Event: Client connected\n"));
+    break;
+  case SYSTEM_EVENT_AP_STADISCONNECTED:
+    // Serial.print(PSTR("[Wi-Fi] Event: Client disconnected\n"));
+    break;
+  case SYSTEM_EVENT_AP_STAIPASSIGNED:
+    // Serial.print(PSTR("[Wi-Fi] Event: Assigned IP address to client\n"));
+    break;
+  case SYSTEM_EVENT_AP_PROBEREQRECVED:
+    // Serial.print(PSTR("[Wi-Fi] Event: Received probe request\n"));
+    break;
+  case SYSTEM_EVENT_GOT_IP6:
+    // Serial.print(PSTR("[Wi-Fi] Event: IPv6 is preferred\n"));
+    break;
+  case SYSTEM_EVENT_ETH_START:
+    // Serial.print(PSTR("[Wi-Fi] Event: SYSTEM_EVENT_ETH_START\n"));
+    break;
+  case SYSTEM_EVENT_ETH_STOP:
+    // Serial.print(PSTR("[Wi-Fi] Event: SYSTEM_EVENT_ETH_STOP\n"));
+    break;
+  case SYSTEM_EVENT_ETH_CONNECTED:
+    // Serial.print(PSTR("[Wi-Fi] Event: SYSTEM_EVENT_ETH_CONNECTED\n"));
+    break;
+  case SYSTEM_EVENT_ETH_DISCONNECTED:
+    // Serial.print(PSTR("[Wi-Fi] Event: SYSTEM_EVENT_ETH_DISCONNECTED\n"));
+    break;
+  case SYSTEM_EVENT_ETH_GOT_IP:
+    // Serial.print(PSTR("[Wi-Fi] Event: SYSTEM_EVENT_ETH_GOT_IP\n"));
+    break;
+  case SYSTEM_EVENT_MAX:
+    break;
+  }
+}
+
+// Wi-Fi connect task
+void wifi_connect_cb()
+{
+  wifi_connect_task.disable();
+
+  Serial.println(PSTR("[Wi-Fi] Status: Connecting ..."));
+  WiFi.disconnect();
+  if (strcmp(wifipassbuff, "NULL") == 0)
+    WiFi.begin(wifissidbuff, NULL);
+  else
+    WiFi.begin(wifissidbuff, wifipassbuff);
+  return;
+
+  uint8_t result = WiFi.waitForConnectResult();
+  if (result == WL_NO_SSID_AVAIL || result == WL_CONNECT_FAILED)
+  {
+    Serial.println(PSTR("[Wi-Fi] Status: Could not connect to Wi-Fi AP"));
+    wifi_connect_task.enableDelayed(1000);
+  }
+  else if (result == WL_IDLE_STATUS)
+  {
+    Serial.println(PSTR("[Wi-Fi] Status: Idle | No IP assigned by DHCP Server"));
+    WiFi.disconnect();
+  }
+  else if (result == WL_CONNECTED)
+  {
+    Serial.printf(PSTR("[Wi-Fi] Status: Connected | IP: %s\n"), WiFi.localIP().toString().c_str());
+  }
+}
+
+// Wi-Fi watchdog task
+void wifi_watchdog_cb()
+{
+  // Serial.println(PSTR("[Watchdog] Checking Wi-Fi ..."));
+  if (WiFi.status() != WL_CONNECTED)
+  {
+    Serial.println(PSTR("[Watchdog] Wi-Fi Disconnected"));
+    WiFi.disconnect();
+    wifi_watchdog_task.disable();
+    wifi_connect_task.enableDelayed(2500);
+    return;
+  }
+  // Serial.println(PSTR("[Watchdog] Wi-Fi is connected!"));
+}
+
 bool MechanicTyping(int pin)
 {
   mcp.digitalWrite(pin, HIGH);
@@ -286,8 +456,18 @@ bool SettingsInit()
 
   strcpy(wifissidbuff, settings.getChar("wifi.ssid"));
   strcpy(wifipassbuff, settings.getChar("wifi.pass"));
+  kwhtimestatbuff = settings.getInt("kwh.timeStatus");
+  kwhtimenomibuff = settings.getInt("kwh.timeNominal");
+  kwhfreqbuff = settings.getInt("kwh.freq");
+  kwhalarmbuff = settings.getLong("kwh.alarm");
+
   Serial.printf("WIFI SSID: %s\n", wifissidbuff);
   Serial.printf("WIFI PASS: %s\n", wifipassbuff);
+  Serial.printf("KWH TIME STATUS: %d\n", kwhtimestatbuff);
+  Serial.printf("KWH TIME NOMINAL: %d\n", kwhtimenomibuff);
+  Serial.printf("KWH FREQ: %d\n", kwhfreqbuff);
+  Serial.printf("KWH ALARM: %d\n", kwhalarmbuff);
+
   Serial.println("**SETTING INIT COMPLETE**");
   return true;
 }
@@ -303,7 +483,36 @@ bool SettingsWifiSave(char *ssid, char *pass)
   settings.readSettings("/config.json");
   Serial.println("---------- New settings content ----------");
 
-  return false;
+  return true;
+}
+
+bool SettingsSaveAll(char *ssid, char *pass, int time1, int time2, int freq, long alarm)
+{
+  settings.setChar("wifi.ssid", ssid);
+  settings.setChar("wifi.pass", pass);
+  settings.setInt("kwh.timeStatus", time1);
+  settings.setInt("kwh.timeNominal", time2);
+  settings.setInt("kwh.freq", freq);
+  settings.setLong("kwh.alarm", alarm);
+
+  Serial.println("---------- Save settings ----------");
+  settings.writeSettings("/config.json");
+  Serial.println("---------- Read settings from file ----------");
+  settings.readSettings("/config.json");
+  Serial.println("---------- New settings content ----------");
+
+  return true;
+}
+
+bool SettingsSaveAlarm(long alarm)
+{
+  settings.setLong("kwh.alarm", alarm);
+  Serial.println("---------- Save settings ----------");
+  settings.writeSettings("/config.json");
+  Serial.println("---------- Read settings from file ----------");
+  settings.readSettings("/config.json");
+  Serial.println("---------- New settings content ----------");
+  return true;
 }
 
 int WiFiFormParsing(String str, // pass as a reference to avoid double memory usage
@@ -392,8 +601,6 @@ void CheckPingBackground(void *parameter)
   pingTimeSend = Alarm.timerRepeat(30, CheckPingSend);
   for (;;)
   {
-    // Serial.print("Main Ping: Executing on core ");
-    // Serial.println(xPortGetCoreID());
     Alarm.delay(1000);
     vTaskDelay(1000 / portTICK_PERIOD_MS);
   }
@@ -407,6 +614,12 @@ void dummySignalSend()
 void BluetoothCallback(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)
 {
   char BTBuffer[50];
+  char ssidBuffer[20];
+  char passBuffer[20];
+  int kwhstat;
+  int kwhnomi;
+  int kwhfreq;
+  long kwhalarm;
 
   if (event == ESP_SPP_SRV_OPEN_EVT)
   {
@@ -416,16 +629,64 @@ void BluetoothCallback(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)
 
   if (event == ESP_SPP_DATA_IND_EVT and KoneksiStage == BT_INIT)
   {
-    int N = WiFiFormParsing(SerialBT.readString(), sPtr, 20, &strData);
-    if (N == 2)
+    String btReceive = SerialBT.readString();
+    int N = WiFiFormParsing(btReceive, sPtr, 20, &strData);
+    Serial.println(btReceive);
+    Serial.println(N);
+
+    if (N > 2)
     {
-      strcpy(wifissidbuff, sPtr[0]);
-      strcpy(wifipassbuff, sPtr[1]);
+      strcpy(ssidBuffer, sPtr[0]);
+      strcpy(passBuffer, sPtr[1]);
+      Serial.printf("DATA BT: ssid=%s pass=%s kwhstat=%s kwhnomi=%s kwhfreq=%s kwhalarm=%s\n",
+                    sPtr[0], sPtr[1], sPtr[2], sPtr[3], sPtr[4], sPtr[5]);
+      kwhstat = atoi(sPtr[2]);
+      kwhnomi = atoi(sPtr[3]);
+      kwhfreq = atoi(sPtr[4]);
+      kwhalarm = atoi(sPtr[5]) * 60000;
       // }
-      Serial.println(wifissidbuff);
-      Serial.println(wifipassbuff);
-      SettingsWifiSave(wifissidbuff, wifipassbuff);
-      ESP.restart();
+      Serial.printf("DATA READ BT: ssid=%s pass=%s kwhstat=%d kwhnomi=%d kwhfreq=%d kwhalarm=%d\n",
+                    ssidBuffer, passBuffer, kwhstat, kwhnomi, kwhfreq, kwhalarm);
+
+      if (strcmp(wifissidbuff, ssidBuffer) == 0 and strcmp(wifipassbuff, passBuffer) == 0)
+      {
+        Serial.println("SAVE WIFI SAME --> NOT RESTART");
+        SettingsSaveAll(ssidBuffer, passBuffer, kwhstat, kwhnomi, kwhfreq, kwhalarm);
+        SettingsInit();
+      }
+
+      else
+      {
+        Serial.println("SAVE WIFI CHANGE --> RESTART");
+        SettingsSaveAll(ssidBuffer, passBuffer, kwhstat, kwhnomi, kwhfreq, kwhalarm);
+        SettingsInit();
+        // WifiInit();
+        ESP.restart();
+      }
+    }
+    if (N = 2)
+    {
+      strcpy(ssidBuffer, sPtr[0]);
+      strcpy(passBuffer, sPtr[1]);
+
+      Serial.printf("DATA READ BT: ssid=%s pass=%s\n",
+                    ssidBuffer, passBuffer);
+
+      if (strcmp(wifissidbuff, ssidBuffer) == 0 and strcmp(wifipassbuff, passBuffer) == 0)
+      {
+        Serial.println("SAVE WIFI SAME --> NOT RESTART");
+        SettingsSaveAll(ssidBuffer, passBuffer, kwhtimestatbuff, kwhtimenomibuff, kwhfreqbuff, kwhalarmbuff);
+        SettingsInit();
+      }
+
+      else
+      {
+        Serial.println("SAVE WIFI CHANGE --> RESTART");
+        SettingsSaveAll(ssidBuffer, passBuffer, kwhtimestatbuff, kwhtimenomibuff, kwhfreqbuff, kwhalarmbuff);
+        SettingsInit();
+        // WifiInit();
+        ESP.restart();
+      }
     }
   }
 }
@@ -433,6 +694,7 @@ void BluetoothCallback(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)
 void KoneksiInit()
 {
   SerialBT.begin(bluetooth_name);
+
   SerialBT.register_callback(BluetoothCallback);
 
   // xTaskCreatePinnedToCore(
@@ -445,51 +707,54 @@ void KoneksiInit()
   //     0);
 }
 
-void WiFiStationConnected(WiFiEvent_t event, WiFiEventInfo_t info)
-{
-  Serial.println("Connected to AP successfully!");
-}
-
-void WiFiGotIP(WiFiEvent_t event, WiFiEventInfo_t info)
-{
-  Serial.println("WiFi connected");
-  Serial.println("IP address: ");
-  Serial.println(WiFi.localIP());
-}
-
-void WiFiStationDisconnected(WiFiEvent_t event, WiFiEventInfo_t info)
-{
-  Serial.println("Disconnected from WiFi access point");
-  Serial.print("WiFi lost connection. Reason: ");
-  Serial.println(info.wifi_sta_disconnected.reason);
-  Serial.println("Trying to Reconnect");
-  WiFi.begin(wifissidbuff, wifipassbuff);
-}
-
-void onWifiEvent(WiFiEvent_t event)
+void WiFiEvent(WiFiEvent_t event)
 {
   switch (event)
   {
-  case WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_CONNECTED:
-    Serial.println("Connected or reconnected to WiFi");
+  case SYSTEM_EVENT_STA_CONNECTED:
+    log_i("Connected to access point");
     break;
-  case WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
-    Serial.println("WiFi Disconnected. Enabling WiFi autoconnect");
-    WiFi.setAutoReconnect(true);
+  case SYSTEM_EVENT_STA_DISCONNECTED:
+    log_i("Disconnected from WiFi access point");
+    break;
+  case SYSTEM_EVENT_AP_STADISCONNECTED:
+    log_i("WiFi client disconnected");
     break;
   default:
     break;
   }
 }
+
 void WifiInit()
 {
   Serial.println("**WIFI INIT START**");
-  WiFi.disconnect(true);
-  delay(1000);
-  // WiFi.onEvent(WiFiStationConnected, WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_CONNECTED);
-  // WiFi.onEvent(WiFiGotIP, WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_GOT_IP);
-  // WiFi.onEvent(WiFiStationDisconnected, WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
-  WiFi.onEvent(onWifiEvent);
+  wifi_connect_cb();
+  wifiReconRunner.init();
+  wifiReconRunner.addTask(wifi_connect_task);
+  wifiReconRunner.addTask(wifi_watchdog_task);
+  WiFi.mode(wifi_mode_t::WIFI_STA);
+  WiFi.onEvent(_wifi_event);
+  wifi_connect_task.enableDelayed(5000);
+  Serial.println("**WIFI INIT COMPLETE**");
+
+  // WiFi.disconnect(true);
+  // delay(1000);
+
+  // while (WiFi.status() != WL_CONNECTED)
+  // {
+  //   WiFi.disconnect();
+  //   log_i("Connecting to ssid=%s w/ pass=%s", wifissidbuff, wifipassbuff);
+  //   if (strcmp(wifipassbuff, "NULL") == 0)
+  //     WiFi.begin(wifissidbuff, NULL);
+  //   else
+  //     WiFi.begin(wifissidbuff, wifipassbuff);
+  //   log_i(" waiting on wifi connection");
+  //   vTaskDelay(4000);
+  // }
+  // log_i("Connected to WiFi");
+  // WiFi.onEvent(WiFiEvent);
+
+  /*
   if (strcmp(wifipassbuff, "NULL") == 0)
     WiFi.begin(wifissidbuff, NULL);
   else
@@ -500,177 +765,32 @@ void WifiInit()
     Serial.print(".");
     if (millis() - start_wifi_millis > wifi_timeout)
     {
-      WiFi.disconnect(true);
-      esp_restart();
+      // WiFi.disconnect(true);
+      // esp_restart();
       // delay(1000);
       // WiFi.begin(wifissidbuff, wifipassbuff);
+      WiFi.disconnect(true, true);
     }
   }
+  WiFi.onEvent(WiFiEvent);
+  */
 
-  Serial.print("WiFi connected to");
-  Serial.print(wifissidbuff);
-  Serial.print(" IP: ");
-  Serial.println(WiFi.localIP());
-  Serial.println("**WIFI INIT COMPLETE**");
+  // Serial.print("WiFi connected to ");
+  // Serial.print(wifissidbuff);
+  // Serial.print(" IP: ");
+  // Serial.println(WiFi.localIP());
+  // Serial.println("**WIFI INIT COMPLETE**");
 
-  // OTASERVER.on("/", []()
-  //              { OTASERVER.send(200, "text/plain", "Hi! I am ESP8266."); });
+  // #ifdef USEOTA
+  //   OTASERVER.on("/", []()
+  //                { OTASERVER.send(200, "text/plain", "Hi! I am ESP8266."); });
 
-  // ElegantOTA.begin(&OTASERVER); // Start ElegantOTA
-  // OTASERVER.begin();
-}
-
-void WifiReconnect()
-{
-  if (WiFi.status() != WL_CONNECTED)
-  {
-    WiFi.reconnect();
-    // WiFi.disconnect(true);
-    delay(1000);
-    // WiFi.begin(wifissidbuff, wifipassbuff);
-    // WiFi.reconnect();
-    return;
-  }
+  //   ElegantOTA.begin(&OTASERVER); // Start ElegantOTA
+  //   OTASERVER.begin();
+  // #endif
 }
 
 void MqttCustomPublish(char *path, String msg);
-
-String sendPhotoToken(char *status, char *sn, char *token)
-{
-  String getAll;
-  String getBody;
-  WiFiClient postClient;
-  camera_fb_t *fb = NULL;
-
-  fb = esp_camera_fb_get();
-  esp_camera_fb_return(fb); // dispose the buffered image
-  fb = NULL;                // reset to capture errors
-  fb = esp_camera_fb_get(); // get fresh image
-  if (!fb)
-  {
-    Serial.println("Camera capture failed");
-    delay(1000);
-    ESP.restart();
-  }
-
-  Serial.println("Connecting to server: " + serverName);
-
-  if (postClient.connect(serverName.c_str(), serverPort))
-  {
-    Serial.println("Connection successful!");
-    String headNominal = "--MGI\r\nContent-Disposition: form-data; name=" + topupBodyNominal +
-                         "; filename=" + topupFileNominal + "\r\nContent-Type: image/jpeg\r\n\r\n";
-    String headSaldo = "--MGI\r\nContent-Disposition: form-data; name=" + topupBodySaldo +
-                       "; filename=" + topupFileSaldo + "\r\nContent-Type: image/jpeg\r\n\r\n";
-    String tail = "\r\n--MGI--\r\n";
-
-    uint32_t imageLen = fb->len;
-    uint32_t extraLen = headNominal.length() + tail.length();
-    uint32_t totalLen = imageLen + extraLen;
-
-    postClient.println("POST " + topupEndpoint + "status=" + status +
-                       "&sn_device=" + sn + "&token=" + token + " HTTP/1.1");
-    Serial.println("POST " + topupEndpoint + "status=" + status +
-                   "&sn_device=" + sn + "&token=" + token + " HTTP/1.1");
-
-    postClient.println("Host: " + serverName);
-    Serial.println("Host: " + serverName);
-    postClient.println("Content-Length: " + String(totalLen));
-    Serial.println("Content-Length: " + String(totalLen));
-    postClient.println("Content-Type: multipart/form-data; boundary=MGI");
-    Serial.println("Content-Type: multipart/form-data; boundary=MGI");
-    postClient.println();
-    Serial.println();
-
-    postClient.print(headNominal);
-    Serial.print(headNominal);
-    uint8_t *fbBuf = fb->buf;
-    size_t fbLen = fb->len;
-    for (size_t n = 0; n < fbLen; n = n + 1024)
-    {
-      if (n + 1024 < fbLen)
-      {
-        postClient.write(fbBuf, 1024);
-        fbBuf += 1024;
-      }
-      else if (fbLen % 1024 > 0)
-      {
-        size_t remainder = fbLen % 1024;
-        postClient.write(fbBuf, remainder);
-      }
-    }
-
-    postClient.println();
-    Serial.println();
-    postClient.print(headSaldo);
-    Serial.print(headSaldo);
-
-    // uint8_t *fbBuf = fb->buf;
-    // size_t fbLen = fb->len;
-    // for (size_t n = 0; n < fbLen; n = n + 1024)
-    // {
-    //   if (n + 1024 < fbLen)
-    //   {
-    //     postClient.write(fbBuf, 1024);
-    //     fbBuf += 1024;
-    //   }
-    //   else if (fbLen % 1024 > 0)
-    //   {
-    //     size_t remainder = fbLen % 1024;
-    //     postClient.write(fbBuf, remainder);
-    //   }
-    // }
-
-    postClient.print(tail);
-    Serial.print(tail);
-
-    esp_camera_fb_return(fb);
-
-    int timoutTimer = 10000;
-    long startTimer = millis();
-    boolean state = false;
-
-    while ((startTimer + timoutTimer) > millis())
-    {
-      Serial.print(".");
-      delay(100);
-      while (postClient.available())
-      {
-        char c = postClient.read();
-        if (c == '\n')
-        {
-          if (getAll.length() == 0)
-          {
-            state = true;
-          }
-          getAll = "";
-        }
-        else if (c != '\r')
-        {
-          getAll += String(c);
-        }
-        if (state == true)
-        {
-          getBody += String(c);
-        }
-        startTimer = millis();
-      }
-      if (getBody.length() > 0)
-      {
-        break;
-      }
-    }
-    Serial.println();
-    // postClient.stop();
-    Serial.println(getBody);
-  }
-  else
-  {
-    getBody = "Connection to " + serverName + " failed.";
-    Serial.println(getBody);
-  }
-  return getBody;
-}
 
 String sendPhotoViewKWH(char *sn)
 {
@@ -728,50 +848,50 @@ String sendPhotoViewKWH(char *sn)
     }
     postClient.print(tail);
     esp_camera_fb_return(fb);
-    int timoutTimer = 10000;
-    long startTimer = millis();
-    boolean state = false;
+    //   int timoutTimer = 10000;
+    //   long startTimer = millis();
+    //   boolean state = false;
 
-    while ((startTimer + timoutTimer) > millis())
-    {
-      Serial.print(".");
-      delay(100);
-      while (postClient.available())
-      {
-        char c = postClient.read();
-        if (c == '\n')
-        {
-          if (getAll.length() == 0)
-          {
-            state = true;
-          }
-          getAll = "";
-        }
-        else if (c != '\r')
-        {
-          getAll += String(c);
-        }
-        if (state == true)
-        {
-          getBody += String(c);
-        }
-        startTimer = millis();
-      }
-      if (getBody.length() > 0)
-      {
-        break;
-      }
-    }
-    Serial.println();
-    // postClient.stop();
-    Serial.println(getBody);
+    //   while ((startTimer + timoutTimer) > millis())
+    //   {
+    //     Serial.print(".");
+    //     delay(100);
+    //     while (postClient.available())
+    //     {
+    //       char c = postClient.read();
+    //       if (c == '\n')
+    //       {
+    //         if (getAll.length() == 0)
+    //         {
+    //           state = true;
+    //         }
+    //         getAll = "";
+    //       }
+    //       else if (c != '\r')
+    //       {
+    //         getAll += String(c);
+    //       }
+    //       if (state == true)
+    //       {
+    //         getBody += String(c);
+    //       }
+    //       startTimer = millis();
+    //     }
+    //     if (getBody.length() > 0)
+    //     {
+    //       break;
+    //     }
+    //   }
+    //   Serial.println();
+    //   // postClient.stop();
+    //   Serial.println(getBody);
+    // }
+    // else
+    // {
+    //   getBody = "Connection to " + serverName + " failed.";
+    //   Serial.println(getBody);
   }
-  else
-  {
-    getBody = "Connection to " + serverName + " failed.";
-    Serial.println(getBody);
-  }
-  return getBody;
+  return String("UPLOADED");
 }
 
 String headerNotifSaldo(char *sn)
@@ -802,7 +922,7 @@ String sendNotifSaldo(char *sn)
   String serverRes;
   WiFiClient postClient;
   String headerTxt = headerNotifSaldo(sn);
-  MqttPublishStatus("SEND NOTIF SALDO");
+
   if (!postClient.connect(SERVER.c_str(), PORT))
   {
     return ("connection failed");
@@ -813,44 +933,121 @@ String sendNotifSaldo(char *sn)
 
   postClient.print(headerTxt);
 
-  delay(20);
-  long tOut = millis() + TIMEOUT;
-  long startTimer = millis();
-  boolean state = false;
+  // WifiEspClient.stop();
+  return String("UPLOADED");
+  ;
+}
+
+String headerNotifSaldoImage(char *sn, size_t length)
+{
+  // POST /notif/lowsaldo/007 HTTP/1.1
+  // Accept: */*
+  // User-Agent: Thunder Client (https://www.thunderclient.com)
+  // Content-Type: multipart/form-data; boundary=---011000010111000001101001
+  // Host: 203.194.112.238:3300
+
+  String serialnum = String(sn);
+  String data;
+  data = "POST /notif/lowsaldo/image/?sn_device=" + serialnum + " HTTP/1.1\r\n";
+  data += "cache-control: no-cache\r\n";
+  data += "Content-Type: multipart/form-data; boundary=";
+  data += BOUNDARY;
+  data += "\r\n";
+  data += "User-Agent: PostmanRuntime/6.4.1\r\n";
+  data += "Accept: */*\r\n";
+  data += "Host: ";
+  data += SERVER;
+  data += "\r\n";
+  data += "accept-encoding: gzip, deflate\r\n";
+  data += "Connection: keep-alive\r\n";
+  data += "content-length: ";
+  data += String(length);
+  data += "\r\n";
+  data += "\r\n";
+  return (data);
+}
+
+String body_NotifLowSaldoImage()
+{
+  String data;
+  data = "--";
+  data += BOUNDARY;
+  data += F("\r\n");
+  data += F("Content-Disposition: form-data; name=\"imgBalance\"; filename=\"picture.jpg\"\r\n");
+  data += F("Content-Type: image/jpeg\r\n");
+  data += F("\r\n");
+
+  return (data);
+}
+
+String sendNotifSaldoImage(uint8_t *data_pic, size_t size_pic)
+{
   String getAll;
   String getBody;
-  while (tOut > millis())
+  WiFiClient postClient;
+
+  Serial.println("Connecting to server: " + SERVER);
+
+  if (postClient.connect(SERVER.c_str(), serverPort))
   {
-    Serial.print(".");
-    delay(100);
-    while (postClient.available())
+    String serverRes;
+    String bodyNotif = body_NotifLowSaldoImage();
+    WiFiClient postClient;
+    String bodyEnds = String("--") + BOUNDARY + String("--\r\n");
+    size_t allLen = bodyNotif.length() + size_pic + bodyEnds.length();
+    String headerTxt = headerNotifSaldoImage(idDevice, allLen);
+
+    if (!postClient.connect(SERVER.c_str(), PORT))
     {
-      char c = postClient.read();
-      if (c == '\n')
-      {
-        if (getAll.length() == 0)
-        {
-          state = true;
-        }
-        getAll = "";
-      }
-      else if (c != '\r')
-      {
-        getAll += String(c);
-      }
-      if (state == true)
-      {
-        getBody += String(c);
-      }
-      startTimer = millis();
+      return ("connection failed");
     }
-    if (getBody.length() > 0)
+
+    postClient.print(headerTxt + bodyNotif);
+    Serial.print(headerTxt + bodyNotif);
+
+    uint8_t *fbBuf = data_pic;
+    size_t fbLen = size_pic;
+    // CaptureToSpiffs("/nominal.jpg", fb->buf, fb->len);
+    for (size_t n = 0; n < fbLen; n = n + 1024)
     {
-      break;
+      if (n + 1024 < fbLen)
+      {
+        postClient.write(fbBuf, 1024);
+        fbBuf += 1024;
+      }
+      else if (fbLen % 1024 > 0)
+      {
+        size_t remainder = fbLen % 1024;
+        postClient.write(fbBuf, remainder);
+      }
     }
+
+    postClient.print("\r\n" + bodyEnds);
+    Serial.print("\r\n" + bodyEnds);
+
+    long tOut = millis() + TIMEOUT;
+    while (tOut > millis())
+    {
+      Serial.print(".");
+      delay(100);
+      if (postClient.available())
+      {
+        serverRes = postClient.readStringUntil('\r');
+        return (serverRes);
+      }
+      else
+      {
+        serverRes = "NOT RESPONSE";
+        return (serverRes);
+      }
+    }
+    // postClient.stop();
+    return serverRes;
   }
-  // WifiEspClient.stop();
-  return getBody;
+  //   return String("UPLOADED");
+  // }
+  // else
+  //   return String("NOT CONNECT");
 }
 
 char *extract_between(const char *str, const char *p1, const char *p2)
@@ -893,7 +1090,6 @@ void printDeviceAddress()
 
 void CameraInit()
 {
-
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
   config.ledc_timer = LEDC_TIMER_0;
@@ -1124,8 +1320,15 @@ void SoundLooping()
 
 void callback(char *topic, byte *payload, unsigned int length)
 {
+  memset(received_payload, '\0', payloadSize); // clear payload char buffer
+  memset(received_topic, '\0', topicSize);
+  int i = 0; // extract payload
+  for (i; i < length; i++)
+  {
+    received_payload[i] = ((char)payload[i]);
+  }
+  received_payload[i] = '\0';
   strcpy(received_topic, topic);
-  memcpy(received_payload, payload, length);
   received_msg = true;
   received_length = length;
   Serial.println("void callback()");
@@ -1200,8 +1403,8 @@ void MqttReconnect()
   while (!mqtt.connected())
   {
     Serial.print("Attempting MQTT connection...");
-    // Attempt to connect
-    if (mqtt.connect("monTok"))
+    String clientId = "TokenOnline_" + String(idDevice);
+    if (mqtt.connect(clientId.c_str()))
     {
       Serial.println("connected");
       MqttPublishStatus("CONNECTED MQTT");
@@ -1218,6 +1421,20 @@ void MqttReconnect()
       delay(5000);
     }
   }
+}
+
+void CaptureAndSendNotif()
+{
+  camera_fb_t *fb = NULL;
+  fb = esp_camera_fb_get();
+  esp_camera_fb_return(fb); // dispose the buffered image
+  fb = NULL;                // reset to capture errors
+  fb = esp_camera_fb_get(); // get fresh image
+                            // OutputSoundValidasi(SoundDetectValidasi());
+  String res;
+  res = sendNotifSaldoImage(fb->buf, fb->len);
+  Serial.println(res);
+  esp_camera_fb_return(fb);
 }
 
 bool SoundDetectLong()
@@ -1307,8 +1524,8 @@ bool SoundDetectShortItron()
   bool detectedShortItronFast2 = detectFrequency(&itronShortFast2, 6, SoundPeak, 186, 190, true);
   bool detectedShortItronFast = detectFrequency(&itronShortFast, 6, SoundPeak, 182, 190, true);
 
-  Serial.printf("%d %d %d %d %d\n", SoundPeak, detectedShortItronFast, detectedShortItronFast2, detectShortCnt);
-  if (detectedShortItronFast or detectedShortItronFast2 and (detectShortCnt > 10 /*and detectShortCnt < 35)*/))
+  // Serial.printf("%d %d %d %d %d\n", SoundPeak, detectedShortItronFast, detectedShortItronFast2, detectShortCnt);
+  if (detectedShortItronFast or detectedShortItronFast2 and (detectShortCnt > 25 /*and detectShortCnt < 35)*/))
   {
     // MqttCustomPublish(topicRSPSoundStatus, "DETECTED SHORT BEEP");
     // Serial.println("DETECTED SHORT BEEP");
@@ -1378,8 +1595,6 @@ bool DetectionLowToken()
   // }
   // return true;
 
-  Serial.println(prevAlarmStatus);
-  Serial.println(AlarmStatus);
   if (SoundDetectShortItron())
   {
     timer.start(2500);
@@ -1403,59 +1618,95 @@ bool DetectionLowToken()
     AlarmStatus = true;
   }
 
+  if (TimeKwhAlarm.time_over())
+  {
+    // MqttCustomPublish("KWHALARM", "SEND NOTIF");
+    timeAlarm = true;
+  }
+
   if ((AlarmStatus and timeAlarm) or (prevAlarmStatus and timeAlarm))
   {
     MqttCustomPublish(topicRSPSoundStatus, "SEND NOTIFICATION SOUND");
-    sendNotifSaldo(idDevice);
-    Serial.println("DETECK LOW TOKEN");
+    // sendNotifSaldo(idDevice);
+    // CaptureAndSendNotif();
     Serial.println("SEND NOTIFICATION");
     counter = 0;
     AlarmStatus = false;
     prevAlarmStatus = false;
     timeAlarm = false;
+    TimeKwhAlarm.start(kwhalarmbuff);
   }
   return false;
 }
 
+// int SoundDetectValidasi()
+// {
+//   int returnValue;
+//   long startTimer = millis();
+//   while (millis() < startTimer + TIMEOUT_SUARA)
+//   {
+//     SoundLooping();
+//     bool detectedGagal = detectFrequency(&soundValidasi, 2, SoundPeak, freqPeak, 196, true);
+
+//     MqttCustomPublish(topicRSPSoundPeak, String(SoundPeak));
+//     MqttCustomPublish(topicRSPSoundCnt, String(cntDetected));
+//     if (detectedGagal)
+//     {
+//       cntDetected++;
+//     }
+//     else
+//     {
+//       soundValidasiCnt = cntDetected;
+//       // Serial.println(detectCntItronGagal);
+//       cntDetected = 0;
+//       // Serial.println(detectCntItronGagal);
+//       // detectCntItronGagal = 0;
+//       // Serial.println("DETECK INVALID");
+//       // break;
+//     }
+//     // returnValue = soundValidasiCnt;
+//   }
+//   // cntDetected = 0;
+//   // soundValidasi = cntDetected;
+//   // cntDetected = 0;
+//   return cntDetected;
+// }
+
 int SoundDetectValidasi()
 {
-  int returnValue;
-  long startTimer = millis();
-  while (millis() < startTimer + TIMEOUT_SUARA)
-  {
-    SoundLooping();
-    bool detectedGagal = detectFrequency(&soundValidasi, 2, SoundPeak, freqPeak, 196, true);
+  int validasiCnt;
+  SoundLooping();
+  bool detectedGagal = detectFrequency(&soundValidasi, 2, SoundPeak, kwhfreqbuff, 196, true);
 
-    MqttCustomPublish(topicRSPSoundPeak, String(SoundPeak));
-    MqttCustomPublish(topicRSPSoundCnt, String(cntDetected));
-    if (detectedGagal)
-    {
-      cntDetected++;
-    }
-    else
-    {
-      soundValidasiCnt = cntDetected;
-      // Serial.println(detectCntItronGagal);
-      cntDetected = 0;
-      // detectCntItronGagal = 0;
-      // Serial.println("DETECK INVALID");
-      // break;
-    }
-    returnValue = soundValidasiCnt;
+  MqttCustomPublish(topicRSPSoundPeak, String(SoundPeak));
+  MqttCustomPublish(topicRSPSoundCnt, String(validasiCnt));
+  if (detectedGagal)
+  {
+    validasiCnt++;
   }
-  Serial.println("Timeout");
-  return cntDetected;
+  else
+  {
+    soundValidasiCnt = validasiCnt;
+    // Serial.println(detectCntItronGagal);
+    // cntDetected = 0;
+    // detectCntItronGagal = 0;
+    // Serial.println("DETECK INVALID");
+    // break;
+  }
+
+  // Serial.println("Timeout");
+  return validasiCnt;
 }
 
 void OutputSoundValidasi(int val)
 {
-  if (val > 41)
+  if (val > 25)
   {
     Serial.println("DETECK GAGAL");
     MqttCustomPublish(topicRSPSoundStatus, "VALIDASI SUARA GAGAL");
   }
 
-  else if (val != 0 && val < 40)
+  else if (val != 0 && val < 25)
   {
     Serial.println("DETECK BENAR");
     MqttCustomPublish(topicRSPSoundStatus, "VALIDASI SUARA BENAR");
@@ -1677,24 +1928,26 @@ String sendImageNominal(uint8_t *data_pic, size_t size_pic)
     postClient.print("\r\n" + bodyEnds);
     Serial.print("\r\n" + bodyEnds);
 
-    long tOut = millis() + TIMEOUT;
-    while (tOut > millis())
-    {
-      Serial.print(".");
-      delay(100);
-      if (postClient.available())
-      {
-        serverRes = postClient.readStringUntil('\r');
-        return (serverRes);
-      }
-      else
-      {
-        serverRes = "NOT RESPONSE";
-        return (serverRes);
-      }
-    }
-    // postClient.stop();
-    return serverRes;
+    // long tOut = millis() + TIMEOUT;
+    // while (tOut > millis())
+    // {
+    //   Serial.print(".");
+    //   delay(100);
+    //   if (postClient.available())
+    //   {
+    //     serverRes = postClient.readStringUntil('\r');
+    //     return (serverRes);
+    //   }
+    //   else
+    //   {
+    //     serverRes = "NOT RESPONSE";
+    //     return (serverRes);
+    //   }
+    // }
+    // // postClient.stop();
+    // return serverRes;
+
+    return String("UPLOADED");
   }
   else
     return String("NOT CONNECT");
@@ -1721,25 +1974,27 @@ String sendImageSaldo(char *token, uint8_t *data_pic, size_t size_pic)
   postClient.print("\r\n" + bodyEnd);
   Serial.print("\r\n" + bodyEnd);
 
-  delay(20);
-  long tOut = millis() + TIMEOUT;
-  while (tOut > millis())
-  {
-    Serial.print(".");
-    delay(100);
-    if (postClient.available())
-    {
-      serverRes = postClient.readStringUntil('\r');
-      return (serverRes);
-    }
-    else
-    {
-      serverRes = "NOT RESPONSE";
-      return (serverRes);
-    }
-  }
-  // postClient.stop();
-  return serverRes;
+  // delay(20);
+  // long tOut = millis() + TIMEOUT;
+  // while (tOut > millis())
+  // {
+  //   Serial.print(".");
+  //   delay(100);
+  //   if (postClient.available())
+  //   {
+  //     serverRes = postClient.readStringUntil('\r');
+  //     return (serverRes);
+  //   }
+  //   else
+  //   {
+  //     serverRes = "NOT RESPONSE";
+  //     return (serverRes);
+  //   }
+  // }
+  // // postClient.stop();
+  // return serverRes;
+
+  return String("UPLOADED");
 }
 
 String sendImageStatusToken(char *sn, uint8_t *data_pic, size_t size_pic)
@@ -1764,25 +2019,27 @@ String sendImageStatusToken(char *sn, uint8_t *data_pic, size_t size_pic)
   postClient.print("\r\n" + bodyEnd);
   Serial.print("\r\n" + bodyEnd);
 
-  delay(20);
-  long tOut = millis() + TIMEOUT;
-  while (tOut > millis())
-  {
-    Serial.print(".");
-    delay(100);
-    if (postClient.available())
-    {
-      serverRes = postClient.readStringUntil('\r');
-      return (serverRes);
-    }
-    else
-    {
-      serverRes = "NOT RESPONSE";
-      return (serverRes);
-    }
-  }
-  // postClient.stop();
-  return serverRes;
+  // delay(20);
+  // long tOut = millis() + TIMEOUT;
+  // while (tOut > millis())
+  // {
+  //   Serial.print(".");
+  //   delay(100);
+  //   if (postClient.available())
+  //   {
+  //     serverRes = postClient.readStringUntil('\r');
+  //     return (serverRes);
+  //   }
+  //   else
+  //   {
+  //     serverRes = "NOT RESPONSE";
+  //     return (serverRes);
+  //   }
+  // }
+  // // postClient.stop();
+  // return serverRes;
+
+  return String("UPLOADED");
 }
 
 void CaptureToSpiffs(String path, uint8_t *data_pic, size_t size_pic)
@@ -1812,8 +2069,169 @@ void ReceiveAlarm(/*char *token*/)
 {
   if (received_msg and (strcmp(received_topic, topicREQAlarm) == 0))
   {
+    int buffTimeAlarm;
+    buffTimeAlarm = atoi(received_payload);
+
+    Serial.print("RECEIVE NEW ALARM VALUE - RAW: ");
+    Serial.println(buffTimeAlarm);
+    kwhalarmbuff = buffTimeAlarm * 60000;
+    Serial.print("VALID MILLIS: ");
+    Serial.println(kwhalarmbuff);
+    SettingsSaveAll(wifissidbuff, wifipassbuff, kwhtimestatbuff, kwhtimenomibuff, kwhfreqbuff, kwhalarmbuff);
+    // SettingsSaveAlarm(kwhalarmbuff);
+    TimeKwhAlarm.time_over();
+    TimeKwhAlarm.start(kwhalarmbuff);
+    received_msg = false;
   }
 }
+
+// void TokenProcess(/*char *token*/)
+// {
+//   if (received_msg and (strcmp(received_topic, topicREQToken) == 0) and received_length == 20)
+//   {
+//     status = Status::PROCCESS_TOKEN;
+//     MqttPublishStatus("EXECUTING TOKEN");
+//     for (int i = 0; i < received_length; i++)
+//     {
+
+//       char chars = received_payload[i];
+//       Serial.printf("%d ", i);
+//       // MqttPublishStatus("SELENOID " + String(chars) + " ON");
+//       switch (chars)
+//       {
+//       case '0':
+
+//         MqttPublishStatus("SELENOID " + String(chars) + " ON");
+
+//         // MechanicTyping(10);
+//         delay(delaySolenoid);
+//         break;
+
+//       case '1':
+
+//         MqttPublishStatus("SELENOID " + String(chars) + " ON");
+//         // MechanicTyping(0);
+//         delay(delaySolenoid);
+//         break;
+
+//       case '2':
+
+//         MqttPublishStatus("SELENOID " + String(chars) + " ON");
+//         // MechanicTyping(1);
+//         delay(delaySolenoid);
+//         break;
+//       case '3':
+
+//         MqttPublishStatus("SELENOID " + String(chars) + " ON");
+//         // MechanicTyping(2);
+//         delay(delaySolenoid);
+//         break;
+//       case '4':
+
+//         MqttPublishStatus("SELENOID " + String(chars) + " ON");
+//         // MechanicTyping(3);
+//         delay(delaySolenoid);
+//         break;
+//       case '5':
+
+//         MqttPublishStatus("SELENOID " + String(chars) + " ON");
+//         // MechanicTyping(4);
+//         delay(delaySolenoid);
+//         break;
+//       case '6':
+
+//         MqttPublishStatus("SELENOID " + String(chars) + " ON");
+//         // MechanicTyping(5);
+//         delay(delaySolenoid);
+//         break;
+//       case '7':
+//         MqttPublishStatus("SELENOID " + String(chars) + " ON");
+//         // MechanicTyping(6);
+//         delay(delaySolenoid);
+//         break;
+//       case '8':
+//         MqttPublishStatus("SELENOID " + String(chars) + " ON");
+//         // MechanicTyping(7);
+//         delay(delaySolenoid);
+//         break;
+//       case '9':
+//         MqttPublishStatus("SELENOID " + String(chars) + " ON");
+//         // MechanicTyping(8);
+//         delay(delaySolenoid);
+//         break;
+//       default:
+//         break;
+//       }
+//     }
+//     // MechanicEnter();
+//     delay(delaySolenoid);
+//     MqttPublishStatus("SELENOID ENTER ON");
+//     delay(delayStatus);
+
+//     camera_fb_t *fb = NULL;
+//     fb = esp_camera_fb_get();
+//     esp_camera_fb_return(fb); // dispose the buffered image
+//     fb = NULL;                // reset to capture errors
+//     fb = esp_camera_fb_get(); // get fresh image
+//     // OutputSoundValidasi(SoundDetectValidasi());
+
+//     String res;
+//     if (!fb)
+//     {
+//       Serial.println("Camera capture failed");
+//       // delay(1000);
+//       ESP.restart();
+//     }
+//     else
+//     {
+//       res = sendImageStatusToken(idDevice, fb->buf, fb->len);
+//       Serial.println(res);
+//       esp_camera_fb_return(fb);
+//     }
+
+//     delay(delayNominal);
+//     fb = NULL;
+//     fb = esp_camera_fb_get();
+//     esp_camera_fb_return(fb); // dispose the buffered image
+//     fb = NULL;                // reset to capture errors
+//     fb = esp_camera_fb_get(); // get fresh image
+//     if (!fb)
+//     {
+//       Serial.println("Camera capture failed");
+//       // delay(1000);
+//       ESP.restart();
+//     }
+//     else
+//     {
+//       res = sendImageNominal(fb->buf, fb->len);
+//       Serial.println(res);
+//       esp_camera_fb_return(fb);
+//     }
+
+//     delay(delaySaldo);
+//     fb = NULL;
+//     fb = esp_camera_fb_get();
+//     esp_camera_fb_return(fb); // dispose the buffered image
+//     fb = NULL;                // reset to capture errors
+//     fb = esp_camera_fb_get(); // get fresh image
+//     if (!fb)
+//     {
+//       Serial.println("Camera capture failed");
+//       delay(1000);
+//       ESP.restart();
+//     }
+//     else
+//     {
+//       res = sendImageSaldo(received_payload, fb->buf, fb->len);
+//       Serial.println(res);
+//       esp_camera_fb_return(fb);
+//     }
+
+//     Serial.println("TOKEN PROCESS END");
+//     received_msg = false;
+//     status = Status::IDLE;
+//   }
+// }
 
 void TokenProcess(/*char *token*/)
 {
@@ -1823,7 +2241,6 @@ void TokenProcess(/*char *token*/)
     MqttPublishStatus("EXECUTING TOKEN");
     for (int i = 0; i < received_length; i++)
     {
-
       char chars = received_payload[i];
       Serial.printf("%d ", i);
       // MqttPublishStatus("SELENOID " + String(chars) + " ON");
@@ -1896,88 +2313,153 @@ void TokenProcess(/*char *token*/)
     // MechanicEnter();
     delay(delaySolenoid);
     MqttPublishStatus("SELENOID ENTER ON");
-    delay(delayStatus);
-
-    // MechanicEnter();
     // delay(delayStatus);
-    String res;
-
-    OutputSoundValidasi(SoundDetectValidasi());
-
-    camera_fb_t *fb = NULL;
-    fb = esp_camera_fb_get();
-    esp_camera_fb_return(fb); // dispose the buffered image
-    fb = NULL;                // reset to capture errors
-    fb = esp_camera_fb_get(); // get fresh image
-    if (!fb)
-    {
-      Serial.println("Camera capture failed");
-      delay(1000);
-      ESP.restart();
-    }
-    else
-    {
-      res = sendImageStatusToken(idDevice, fb->buf, fb->len);
-      Serial.println(res);
-      esp_camera_fb_return(fb);
-    }
-
-    delay(delayNominal);
-    fb = NULL;
-    fb = esp_camera_fb_get();
-    esp_camera_fb_return(fb); // dispose the buffered image
-    fb = NULL;                // reset to capture errors
-    fb = esp_camera_fb_get(); // get fresh image
-    if (!fb)
-    {
-      Serial.println("Camera capture failed");
-      delay(1000);
-      ESP.restart();
-    }
-    else
-    {
-      res = sendImageNominal(fb->buf, fb->len);
-      Serial.println(res);
-      esp_camera_fb_return(fb);
-    }
-
-    delay(delaySaldo);
-    fb = NULL;
-    fb = esp_camera_fb_get();
-    esp_camera_fb_return(fb); // dispose the buffered image
-    fb = NULL;                // reset to capture errors
-    fb = esp_camera_fb_get(); // get fresh image
-    if (!fb)
-    {
-      Serial.println("Camera capture failed");
-      delay(1000);
-      ESP.restart();
-    }
-    else
-    {
-      res = sendImageSaldo(received_payload, fb->buf, fb->len);
-      Serial.println(res);
-      esp_camera_fb_return(fb);
-    }
-
-    Serial.println("TOKEN PROCESS END");
+    // validasiStartTimer = millis();
+    afterSolenoid = millis();
+    Serial.printf("afterSolenoid =%d\n", afterSolenoid);
     received_msg = false;
-    status = Status::IDLE;
+    TokenStateStatus = true;
   }
-}
 
-void enableTimer()
-{
-  timeAlarm = true;
-}
+  if (status == Status::PROCCESS_TOKEN and millis() < afterSolenoid + kwhtimestatbuff)
+  {
+    Serial.printf("millis() =%d RecordValidasiSound()\n", millis());
+    soundValidasiCnt = SoundDetectValidasi();
+  }
 
-void disableTimer()
-{
-  timeAlarm = false;
+  if (status == Status::PROCCESS_TOKEN and millis() < afterSolenoid + (kwhtimestatbuff - 2))
+  {
+    Serial.printf("millis() =%d CaptureStatus()\n", millis());
+    if (TokenStateStatus)
+    {
+      String res;
+      camera_fb_t *fb = NULL;
+      fb = esp_camera_fb_get();
+      esp_camera_fb_return(fb); // dispose the buffered image
+      fb = NULL;                // reset to capture errors
+      fb = esp_camera_fb_get(); // get fresh image
+      if (!fb)
+      {
+        Serial.println("Camera capture failed");
+        delay(1000);
+        ESP.restart();
+      }
+      else
+      {
+        res = sendImageStatusToken(idDevice, fb->buf, fb->len);
+        Serial.println(res);
+        esp_camera_fb_return(fb);
+      }
+      TokenStateStatus = false;
+      TokenStateNominal = true;
+    }
+  }
+
+  if (status == Status::PROCCESS_TOKEN and
+      millis() > afterSolenoid + kwhtimestatbuff and
+      millis() < afterSolenoid + (kwhtimenomibuff - 200))
+  {
+    Serial.printf("millis() =%d CaptureNominal()\n", millis());
+    if (TokenStateNominal)
+    {
+      String res;
+      camera_fb_t *fb = NULL;
+      fb = esp_camera_fb_get();
+      esp_camera_fb_return(fb); // dispose the buffered image
+      fb = NULL;                // reset to capture errors
+      fb = esp_camera_fb_get(); // get fresh image
+      if (!fb)
+      {
+        Serial.println("Camera capture failed");
+        delay(1000);
+        ESP.restart();
+      }
+      else
+      {
+        res = sendImageNominal(fb->buf, fb->len);
+        Serial.println(res);
+        esp_camera_fb_return(fb);
+      }
+      TokenStateNominal = false;
+      TokenStateSaldo = true;
+    }
+  }
+
+  if (status == Status::PROCCESS_TOKEN and millis() > afterSolenoid + kwhtimenomibuff)
+  {
+    Serial.printf("millis() =%d CaptureSaldo()\n", millis());
+    if (TokenStateSaldo)
+    {
+      String res;
+      camera_fb_t *fb = NULL;
+      fb = esp_camera_fb_get();
+      esp_camera_fb_return(fb); // dispose the buffered image
+      fb = NULL;                // reset to capture errors
+      fb = esp_camera_fb_get(); // get fresh image
+      if (!fb)
+      {
+        Serial.println("Camera capture failed");
+        delay(1000);
+        ESP.restart();
+      }
+      else
+      {
+        res = sendImageSaldo(received_payload, fb->buf, fb->len);
+        Serial.println(res);
+        esp_camera_fb_return(fb);
+      }
+      TokenStateSaldo = false;
+      Serial.println("TOKEN PROCESS END");
+      received_msg = false;
+      status = Status::IDLE;
+    }
+  }
 }
 
 bool send = false;
 int timeEnableAlarm = 60;
+
+void kirimAlarm()
+{
+  if (TimeKwhAlarm.time_over())
+  {
+    MqttCustomPublish("KWHALARM", "SEND NOTIF");
+    CaptureAndSendNotif();
+    Serial.printf("START ALARM: %d\n", kwhalarmbuff);
+    TimeKwhAlarm.start(kwhalarmbuff);
+  }
+}
+
+void connectToWiFi()
+{
+  log_i("connect to wifi");
+  while (WiFi.status() != WL_CONNECTED)
+  {
+    WiFi.disconnect();
+    WiFi.begin(wifissidbuff, wifipassbuff);
+    log_i(" waiting on wifi connection");
+    vTaskDelay(4000);
+  }
+  log_i("Connected to WiFi");
+  WiFi.onEvent(WiFiEvent);
+}
+
+void WifiKeepAlive(void *pvParameters)
+{
+  for (;;)
+  {
+    if (!(WiFi.status() == WL_CONNECTED))
+    {
+      connectToWiFi();
+      log_i("WiFi status %s", String(WiFi.status()));
+      if (!(WiFi.status() == WL_CONNECTED))
+      {
+        connectToWiFi();
+      }
+    }
+  }
+}
+
 void setup()
 {
   Serial.begin(115200);
@@ -1986,14 +2468,10 @@ void setup()
   KoneksiInit();
   WifiInit();
   CameraInit();
-
-  if (!SPIFFS.begin(false /* false: Do not format if mount failed */))
-  {
-    Serial.println("Failed to mount LittleFS");
-  }
-
+  delay(1000);
   SoundInit();
-  // MechanicInit();
+  // CameraInit();
+
   mqtt.setServer(mqttServer, 1883);
   mqtt.setCallback(callback);
 
@@ -2003,8 +2481,6 @@ void setup()
 
   Alarm.timerOnce(10, dummySignalSend);
   pingTimeSend = Alarm.timerRepeat(30, dummySignalSend);
-  Alarm.timerRepeat(timeEnableAlarm, enableTimer);
-  Alarm.timerRepeat(timeEnableAlarm + 2, disableTimer);
 
   pinMode(33, OUTPUT);
   digitalWrite(33, LOW);
@@ -2013,19 +2489,25 @@ void setup()
 
 void loop()
 {
-  // WifiReconnect();
-  if (!mqtt.connected() /*and status == Status::IDLE*/)
-  {
-    MqttReconnect();
-  }
-  if (status == Status::IDLE)
-  {
-    mqtt.loop();
-    DetectionLowToken();
-  }
 
-  TokenProcess();
-  GetKwhProcess();
+  wifiReconRunner.execute();
+  if (WiFi.status() == WL_CONNECTED /*and wifiReconRunner.execute()*/)
+  {
+    if (!mqtt.connected() /*and status == Status::IDLE*/)
+    {
+      MqttReconnect();
+    }
+    if (status == Status::IDLE)
+    {
+      mqtt.loop();
+      // DetectionLowToken();
+      // kirimAlarm();
+    }
 
+    ReceiveAlarm();
+    TokenProcess();
+    GetKwhProcess();
+  }
   Alarm.delay(0);
+  // }
 }

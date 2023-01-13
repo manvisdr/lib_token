@@ -17,8 +17,8 @@
 			"path": "esp_inmp411_detecbeep"
 		},
 		{
-			"name": "esp32dev_lora_snippet",
-			"path": "esp32dev_lora_snippet"
+			"name": "esp32cam_snippets",
+			"path": "esp32cam_snippets"
 		}
 	],
 	"settings": {

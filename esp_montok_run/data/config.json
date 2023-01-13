@@ -1,7 +1,7 @@
 {
   "device": {
-    "id": "007",
-    "serialnum": "TOKONL2P220V0002",
+    "id": "009",
+    "serialnum": "TOKONL2P220V0003",
     "firmwareversion": 1.0,
     "status": "running"
   },
@@ -10,7 +10,13 @@
     "uuid": 12414314
   },
   "wifi": {
-    "ssid": "MGI-MNC",
-    "password": "#neurixmnc#"
+    "ssid": "lepi",
+    "pass": "1234567890"
+  },
+  "kwh": {
+    "timeStatus": "700",
+    "timeNominal": "1300",
+    "freq": "186",
+    "alarm": "12000"
   }
 }
