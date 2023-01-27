@@ -23,7 +23,8 @@
 #include "SettingsManager.h"
 #include "debug_macro.h"
 #ifdef ARDUINO_ARCH_ESP32
-#include "SPIFFS.h"
+#include <SPIFFS.h>
+#define SPIFFS SPIFFS
 #endif
 #ifdef ARDUINO_ARCH_ESP8266
 #include "FS.h"

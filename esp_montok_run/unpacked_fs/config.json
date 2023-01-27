@@ -1,1 +1,1 @@
-{"device":{"id":"008","serialnum":"TOKONL2P220V0002","firmwareversion":1,"status":"running"},"bluetooth":{"name":"TOKEN-ONLINE_008","uuid":12414314},"wifi":{"ssid":"MGI-MNC","pass":"#neurixmnc#"},"kwh":{"timeStatus":1,"timeNominal":2,"freq":3,"alarm":4}}
+{"device":{"id":"009","serialnum":"TOKONL2P220V0003","firmwareversion":1,"status":"running"},"bluetooth":{"name":"TOKEN-ONLINE_009","uuid":12414314},"wifi":{"ssid":"lepi","pass":"1234567890"},"kwh":{"timeStatus":"700","timeNominal":"1300","freq":"186","alarm":"12000"}}

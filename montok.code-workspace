@@ -19,6 +19,10 @@
 		{
 			"name": "esp32cam_snippets",
 			"path": "esp32cam_snippets"
+		},
+		{
+			"name": "esp_monkwh_v1.1_lora",
+			"path": "esp_monkwh_v1.1_lora"
 		}
 	],
 	"settings": {
@@ -38,7 +42,9 @@
 			"cstdint": "cpp",
 			"cstddef": "cpp",
 			"forward_list": "cpp",
-			"list": "cpp"
+			"list": "cpp",
+			"cmath": "cpp",
+			"system_error": "cpp"
 		},
 		"idf.gitPathWin": "C:/Espressif/tools/idf-git/2.34.2/cmd/git.exe",
 		"idf.espIdfPathWin": "C:/Espressif/frameworks/esp-idf-v5.0/",

@@ -753,3 +753,364 @@
 //   // Serial.print("Main Loop: Executing on core ");
 //   // Serial.println(xPortGetCoreID());
 // }
+
+#include <Arduino.h>
+#ifdef ESP8266
+#include <ESP8266WiFi.h>
+#include <TZ.h>
+using ssid_char_t = const char;
+#else // ESP32
+#include <WiFi.h>
+using ssid_char_t = char;
+#endif
+#include <ESPPerfectTime.h>
+#include <WiFiClient.h>
+#include <PubSubClient.h>
+#include <Preferences.h>
+
+Preferences EepromStatus;
+
+enum class StatusTekan : uint8_t
+{
+  NONE,
+  SOLENOID_0,
+  SOLENOID_1,
+  SOLENOID_2,
+  SOLENOID_3,
+  SOLENOID_4,
+  SOLENOID_5,
+  SOLENOID_6,
+  SOLENOID_7,
+  SOLENOID_8,
+  SOLENOID_9,
+  SOLENOID_ENTER
+};
+StatusTekan SolenoidStatus = StatusTekan::NONE;
+
+struct status
+{
+  long timestamp;
+  String token;
+  int solenoid;
+  bool success;
+};
+
+status statusprev; // = {0, "00000000000000000", StatusTekan::NONE, 0};
+status statusnow;  // = {0, "00000000000000000", StatusTekan::NONE, 0};
+
+WiFiClient wificlient;
+PubSubClient mqtt(wificlient);
+IPAddress mqttServer(203, 194, 112, 238);
+
+char ssidz[20] = "MGI-MNC";
+String ssids = "";
+String ssid_dest = "";
+String tokenprev = "";
+ssid_char_t *ssid = "MGI-MNC";
+ssid_char_t *password = "#neurixmnc#";
+char MQTTPATH[] = "TEST/TOKEN";
+int delaytekan = 300;
+
+bool newtoken = false;
+
+// Japanese NTP server
+const char *ntpServer = "0.id.pool.ntp.org";
+
+const int payloadSize = 100;
+const int topicSize = 128;
+char received_topic[topicSize];
+char received_payload[payloadSize];
+unsigned int received_length;
+bool received_msg = false;
+
+void callback(char *topic, byte *payload, unsigned int length)
+{
+  memset(received_payload, '\0', payloadSize); // clear payload char buffer
+  memset(received_topic, '\0', topicSize);
+  int i = 0; // extract payload
+  for (i; i < length; i++)
+  {
+    received_payload[i] = ((char)payload[i]);
+  }
+  received_payload[i] = '\0';
+  strcpy(received_topic, topic);
+  received_msg = true;
+  received_length = length;
+  Serial.println("void Mqttcallback()");
+  Serial.printf("received_topic %s received_length = %d \n", received_topic, received_length);
+  Serial.printf("received_payload %s \n", received_payload);
+  Serial.println("void Mqttcallback()");
+}
+
+void getEepromAll(bool print)
+{
+  long bufftime = EepromStatus.getLong("TopupTime", 0);
+  // char bufftoken[20];
+  String bufftoken = EepromStatus.getString("TopupToken", "");
+  int buffsolenoid = (int)EepromStatus.getInt("TopupStatus", false);
+  bool buffsuccess = EepromStatus.getBool("TopupSuccess", false);
+  if (print)
+  {
+    // Serial.printf("timestamp: %d \ntoken: %s \nsolenoid: %d \nsuccess: %d\n",
+    //               bufftime, bufftoken, buffsolenoid, buffsuccess);
+    Serial.println(bufftime);
+    Serial.println(bufftoken);
+    Serial.println(buffsolenoid);
+    Serial.println(buffsuccess);
+    Serial.printf("%s\n", bufftoken.c_str());
+  }
+}
+
+void getEepromAll(bool print, long *time, String *token, int *solenoid, bool *success)
+{
+  long bufftime = EepromStatus.getLong("TopupTime", 0);
+  // char bufftoken[20];
+  String bufftoken = EepromStatus.getString("TopupToken", "");
+  int buffsolenoid = (int)EepromStatus.getInt("TopupStatus", false);
+  bool buffsuccess = EepromStatus.getBool("TopupSuccess", false);
+  *time = bufftime;
+  *token = bufftoken;
+  *solenoid = buffsolenoid;
+  *success = buffsuccess;
+  if (print)
+  {
+    // Serial.printf("timestamp: %d \ntoken: %s \nsolenoid: %d \nsuccess: %d\n",
+    //               bufftime, bufftoken, buffsolenoid, buffsuccess);
+    Serial.println(bufftime);
+    Serial.println(bufftoken);
+    Serial.println(buffsolenoid);
+    Serial.println(buffsuccess);
+    Serial.printf("%s\n", bufftoken.c_str());
+  }
+}
+
+void saveEepromNewToken(long timestamp, String token)
+{
+  EepromStatus.putLong("TopupTime", timestamp);
+  EepromStatus.putString("TopupToken", token);
+}
+
+void saveEepromSolenoid(int solenoid)
+{
+  EepromStatus.putInt("TopupStatus", solenoid);
+}
+
+void saveEepromSuccess(bool success)
+{
+  EepromStatus.putBool("TopupSuccess", success);
+}
+
+void connectWiFi()
+{
+  WiFi.begin(ssid, password);
+
+  Serial.print("\nWifi connecting...");
+  while (WiFi.status() != WL_CONNECTED)
+  {
+    Serial.print(".");
+    delay(500);
+  }
+
+  Serial.println("connected. ");
+}
+
+void MqttReconnect()
+{
+  // Loop until we're reconnected
+  while (!mqtt.connected())
+  {
+    Serial.print("Attempting MQTT connection...");
+    String clientId = "test" + String(random(300));
+
+    if (mqtt.connect(clientId.c_str()))
+    {
+      Serial.println("connected");
+      mqtt.subscribe(MQTTPATH);
+    }
+    else
+    {
+      Serial.print("failed, rc=");
+      Serial.print(mqtt.state());
+      Serial.println(" try again in 5 seconds");
+      // Wait 5 seconds before retrying
+      delay(5000);
+    }
+  }
+}
+
+void printTime(struct tm *tm, suseconds_t usec)
+{
+  Serial.printf("%04d/%02d/%02d %02d:%02d:%02d.%06ld\n",
+                tm->tm_year + 1900,
+                tm->tm_mon + 1,
+                tm->tm_mday,
+                tm->tm_hour,
+                tm->tm_min,
+                tm->tm_sec,
+                usec);
+}
+
+void PROCESS()
+{
+  if (received_msg and (strcmp(received_topic, MQTTPATH) == 0) and received_length == 20)
+  {
+    newtoken = true;
+    time_t t = pftime::time(nullptr);
+    Serial.printf("timestamp: %d token: %s\n", t, received_payload);
+    statusnow.timestamp = t;
+    statusnow.token = "";
+    statusnow.success = false;
+    saveEepromSuccess(statusnow.success);
+    for (int i = 0; i < received_length; i++)
+    {
+      statusnow.token += received_payload[i];
+    }
+    saveEepromNewToken(statusnow.timestamp, statusnow.token);
+
+    for (int i = 0; i < received_length; i++)
+    {
+      char chars = received_payload[i];
+      Serial.printf("%d ", i);
+      statusnow.solenoid = i;
+      saveEepromSolenoid(i);
+      switch (chars)
+      {
+      case '0':
+        SolenoidStatus = StatusTekan::SOLENOID_0;
+        // EepromStatus.putBytes();
+
+        delay(delaytekan);
+        break;
+
+      case '1':
+        SolenoidStatus = StatusTekan::SOLENOID_1;
+        // MechanicTyping(0);
+
+        delay(delaytekan);
+        break;
+
+      case '2':
+        SolenoidStatus = StatusTekan::SOLENOID_2;
+        // MechanicTyping(1);
+
+        delay(delaytekan);
+        break;
+      case '3':
+        SolenoidStatus = StatusTekan::SOLENOID_3;
+        // MechanicTyping(2);
+
+        delay(delaytekan);
+        break;
+      case '4':
+        SolenoidStatus = StatusTekan::SOLENOID_4;
+
+        // MechanicTyping(3);
+        delay(delaytekan);
+        break;
+      case '5':
+        SolenoidStatus = StatusTekan::SOLENOID_5;
+
+        // MechanicTyping(4);
+        delay(delaytekan);
+        break;
+      case '6':
+        SolenoidStatus = StatusTekan::SOLENOID_6;
+        // MechanicTyping(5);
+
+        delay(delaytekan);
+        break;
+      case '7':
+        SolenoidStatus = StatusTekan::SOLENOID_7;
+        // MechanicTyping(6);
+
+        delay(delaytekan);
+        break;
+      case '8':
+        SolenoidStatus = StatusTekan::SOLENOID_8;
+        // MechanicTyping(7);
+
+        delay(delaytekan);
+        break;
+      case '9':
+        SolenoidStatus = StatusTekan::SOLENOID_9;
+        // MechanicTyping(8);
+
+        delay(delaytekan);
+        break;
+      default:
+        break;
+      }
+    }
+    Serial.println();
+    statusnow.success = true;
+    saveEepromSuccess(statusnow.success);
+    Serial.println("DATA STATUSNOW STRUCT");
+    Serial.printf("timestamp: %d \ntoken: %s \nsolenoid: %d \nsuccess: %d\n",
+                  statusnow.timestamp, statusnow.token, (int)statusnow.solenoid, statusnow.success);
+
+    // Serial.println(statusnow.timestamp);
+    // Serial.printf("%d\n", (int)statusnow.solenoid);
+    // Serial.println(statusnow.token);
+    // Serial.println(statusnow.success);
+    Serial.println("DATA EEPROM SAVED");
+    getEepromAll(true);
+    received_msg = false;
+    newtoken = false;
+  }
+}
+
+void EepromInit()
+{
+  EepromStatus.begin("TopupTime", false);
+  EepromStatus.begin("TopupToken", false);
+  EepromStatus.begin("TopupStatus", false);
+  EepromStatus.begin("TopupSuccess", false);
+
+  getEepromAll(true);
+}
+
+void setup()
+{
+  EepromInit();
+  Serial.begin(115200);
+  getEepromAll(true, &statusnow.timestamp, &statusnow.token, &statusnow.solenoid, &statusnow.success);
+
+  Serial.println("---STRTUCT LOAD---");
+  Serial.println(statusnow.timestamp);
+  Serial.printf("%d\n", (int)statusnow.solenoid);
+  Serial.println(statusnow.token);
+  Serial.println(statusnow.success);
+
+  connectWiFi();
+  mqtt.setServer(mqttServer, 1883);
+  mqtt.setCallback(callback);
+
+  // Configure SNTP client in the same way as built-in one
+#ifdef ESP8266
+  pftime::configTzTime(TZ_Asia_Tokyo, ntpServer);
+#else // ESP32
+  pftime::configTzTime(PSTR("WIB-7"), ntpServer);
+#endif
+}
+
+void loop()
+{
+  if (!mqtt.connected() /*and status == Status::IDLE*/)
+  {
+    MqttReconnect();
+  }
+  mqtt.loop();
+  if (!statusnow.success and !newtoken)
+  {
+    Serial.println("EXECUTING PREV TOKEN");
+    for (int i = 0; i < 20; i++)
+    {
+      Serial.print(statusnow.token[i]);
+      saveEepromSolenoid(i);
+    }
+    Serial.println(" ");
+    statusnow.success = true;
+    saveEepromSuccess(statusnow.success);
+  }
+  PROCESS();
+}
