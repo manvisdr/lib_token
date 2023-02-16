@@ -49,10 +49,10 @@ const sRFM_pins RFM_pins = {
 String customerID;
 String kwhID;
 const String channelId = "monKWH/";
-const char *devAddr = "01511112";
+const char *devAddr = "29CBEBB1";
 // const char *devAddr = "01511111"; monkwh mk7 legi
-const char *nwkSKey = "87A35777F816A6D00635D5BF11AC6E7D";
-const char *appSKey = "40195AAB5D7B2C0ABBA4D8B6BFC7BB5B";
+const char *nwkSKey = "927B1EF8E776A54185C1A51FDD43DFCB";
+const char *appSKey = "AFF8978601D9C13C3FB153C5EF2DF551";
 
 gxByteBuffer frameData;
 const uint32_t WAIT_TIME = 2000;

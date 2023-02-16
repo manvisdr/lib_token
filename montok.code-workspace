@@ -1,10 +1,6 @@
 {
 	"folders": [
 		{
-			"name": "espcam_montok_v0.beta",
-			"path": "espcam_montok_v0.beta"
-		},
-		{
 			"name": "esp_montok_run",
 			"path": "esp_montok_run"
 		},
@@ -21,8 +17,16 @@
 			"path": "esp32cam_snippets"
 		},
 		{
-			"name": "esp_monkwh_v1.1_lora",
-			"path": "esp_monkwh_v1.1_lora"
+			"name": "esp32_snippet",
+			"path": "esp32_snippet"
+		},
+		{
+			"name": "esp_montok_test",
+			"path": "esp_montok_test"
+		},
+		{
+			"name": "esp_montok_v1",
+			"path": "esp_montok_v1"
 		}
 	],
 	"settings": {
@@ -44,7 +48,8 @@
 			"forward_list": "cpp",
 			"list": "cpp",
 			"cmath": "cpp",
-			"system_error": "cpp"
+			"system_error": "cpp",
+			"*.tcc": "cpp"
 		},
 		"idf.gitPathWin": "C:/Espressif/tools/idf-git/2.34.2/cmd/git.exe",
 		"idf.espIdfPathWin": "C:/Espressif/frameworks/esp-idf-v5.0/",

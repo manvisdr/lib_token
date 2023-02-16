@@ -1,7 +1,7 @@
 #include <Arduino.h>
 
 #define TYPE_SEND_LORA
-#define US_915
+
 #define TIME_METER
 // #define TIME_RTC
 #ifdef TIME_RTC
@@ -36,7 +36,7 @@ const sRFM_pins RFM_pins = {
 EdmiCMDReader edmiread(Serial2, RXD2, TXD2);
 
 //  Var CONFIG DEFAULT
-String customerID = "54565456";
+ulong deviceNumber;
 String kwhID;
 String kwhType = "MK10E";
 const String channelId = "monKWH/";
@@ -44,7 +44,7 @@ const String channelId = "monKWH/";
 // const char *devAddr = "260D6ECC";
 // const char *nwkSKey = "1FD053B476BF4F732DC8CF5E565538B9";
 // const char *appSKey = "2EE8E2940E6799AD78F9F4C6DA8C53D1";
-const char *devAddr = "260d44c2";
+const char *devAddr = "3bad8eb1";
 const char *nwkSKey = "927b1ef8e776a54185c1a51fdd43dfcb";
 const char *appSKey = "aff8978601d9c13c3fb153c5ef2df551";
 const unsigned int interval = 5000;
@@ -179,7 +179,7 @@ void setup()
 #endif
     Serial.println(kwhID);
   }
-
+  deviceNumber = strtoul(devAddr, NULL, 16);
 } // setup
 
 void loop()
@@ -203,9 +203,9 @@ void loop()
   }
   else if (status == EdmiCMDReader::Status::Finish)
   {
-    sprintf(myStr, "~*%d*%s*%s*%s*%s*%s*%s*%s*%s*%s*%s*%s*%s*%s*%s*%s*%s*%s#",
+    sprintf(myStr, "~*%d*%d*%s*%s*%s*%s*%s*%s*%s*%s*%s*%s*%s*%s*%s*%s*%s*%s#",
             3,
-            customerID,
+            deviceNumber,
             kwhID,
             String(edmiread.voltR() * 1000, 4).c_str(),
             String(edmiread.voltS() * 1000, 4).c_str(),
