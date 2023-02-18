@@ -6,9 +6,11 @@
 #include <WiFi.h>
 #include <WiFiClient.h>
 #include <PubSubClient.h>
+#include <Adafruit_MCP23017.h>
 // #include <Adafruit_MCP23X17.h>
-
-// Adafruit_MCP23X17 mcp;
+#define PIN_MCP_SCL 15
+#define PIN_MCP_SDA 14
+Adafruit_MCP23017 mcp;
 WiFiClient client;
 PubSubClient mqtt(client);
 IPAddress mgiServer(203, 194, 112, 238);
@@ -37,6 +39,7 @@ static unsigned int hexingLong = 0;
 static unsigned int itronShortFast = 0;
 static unsigned int itronBenar = 0;
 static unsigned int itronGagal = 0;
+static unsigned int soundValidasi;
 static unsigned long ts = millis();
 static unsigned long last = micros();
 unsigned int sum = 0;
@@ -332,24 +335,220 @@ void AlarmDetected()
     countdown.start(60000);
   }
 }
+int soundValidasiCnt = 0;
+int SoundDetectValidasi()
+{
+  int validasiCnt;
+  SoundLooping();
+  bool detectedGagal = detectFrequency(&soundValidasi, 2, SoundPeak, 182, 196, true);
+
+  // MqttCustomPublish(topicRSPSoundPeak, String(SoundPeak));
+  // MqttCustomPublish(topicRSPSoundStatusVal, String(soundValidasiCnt));
+  if (detectedGagal /* and loudness > 40 */)
+  {
+    soundValidasiCnt++;
+    // Serial.println(soundValidasiCnt);
+  }
+  Serial.print(SoundPeak);
+  Serial.print(" ");
+  Serial.println(soundValidasiCnt);
+}
+
+void MechanicInit()
+{
+  Wire.begin(PIN_MCP_SDA, PIN_MCP_SCL);
+  mcp.begin(&Wire);
+  for (int i = 0; i < 16; i++)
+  {
+    mcp.pinMode(i, OUTPUT); // MCP23017 pins are set for inputs
+  }
+  Serial.println("MechanicInit()...Successful");
+}
+
+bool MechanicTyping(int pin)
+{
+  mcp.digitalWrite(pin, HIGH);
+  delay(150);
+  mcp.digitalWrite(pin, LOW);
+  return true;
+}
+
+void MechanicEnter()
+{
+  MechanicTyping(11);
+}
+
+int prevVal;
+int nowVal;
+bool bolprevVal;
+bool bolnowVal;
+bool bolnexVal;
+bool outVal;
+int bin1 = 182;
+bool peakAwal;
+int counterNew;
+
+int valmilis = 10000;
+long solenoidMillis;
+long afterSolenoidMillis;
+
+int begin_pos;
+int last_pos;
+int detected_pos;
+int detected_pos1;
+int valueInterval;
+int counterBeep;
+float division;
+bool flagEnter = false;
+int counterAlarm;
 
 void setup()
 {
   Serial.begin(115200);
+  MechanicInit();
   SoundInit();
-  timer.prepare(6000);
-  countdown.prepare(60000);
-  WiFi.begin(ssid, pass);
-  mqtt.setServer(mgiServer, 1883);
+  solenoidMillis = 5000;
+  // timer.prepare(6000);
+  // countdown.prepare(60000);
+  // WiFi.begin(ssid, pass);
+  // mqtt.setServer(mgiServer, 1883);
   // mqtt.setCallback(callback);
+}
+
+void DeteksiAlarm()
+{
+  SoundLooping();
+  bolprevVal = bolnowVal;
+  bolnowVal = bolnexVal;
+  bolnexVal = SoundPeak == bin1 || (SoundPeak == bin1 + 1 || SoundPeak == bin1 - 1);
+  if (bolnowVal > bolnexVal)
+  {
+    counterAlarm++;
+  }
+
+  else if (bolnowVal > bolnexVal)
+  {
+    counterAlarm++;
+  }
+  else
+    counterNew++;
+}
+
+void DeteksiValidasi()
+{
+  if (millis() > solenoidMillis + valmilis and !flagEnter)
+  {
+    Serial.println("STATE SOLENOID ENTER");
+    MechanicEnter();
+    flagEnter = true;
+    afterSolenoidMillis = millis();
+    Serial.println("STATE RECORD MULAI");
+  }
+
+  if (flagEnter and millis() < afterSolenoidMillis + 5000)
+  {
+    // Serial.printf("millis() =%d RecordValidasiSound()\n", millis());
+
+    SoundLooping();
+
+    bolprevVal = bolnowVal;
+    bolnowVal = bolnexVal;
+    bolnexVal = SoundPeak == bin1 || (SoundPeak == bin1 + 1 || SoundPeak == bin1 - 1);
+
+    if ((bolprevVal < bolnowVal))
+    {
+      begin_pos = counterNew;
+    }
+
+    else if (bolnowVal > bolnexVal)
+    {
+      last_pos = counterNew;
+      counterBeep++;
+      valueInterval += last_pos - begin_pos;
+    }
+    else
+      counterNew++;
+    // Serial.print(SoundPeak);
+    // Serial.print(" ");
+    // Serial.print(detected_pos);
+    // Serial.print(" ");
+    // Serial.print(abs(detected_pos1));
+    // Serial.print(" ");
+    // Serial.print(abs(detected_pos1));
+    // Serial.print(" ");
+    Serial.print(SoundPeak);
+    Serial.print(" ");
+    Serial.print(begin_pos);
+    Serial.print(" ");
+    Serial.print(last_pos);
+    Serial.print(" ");
+    Serial.print(valueInterval);
+    Serial.print(" ");
+    Serial.println(counterBeep);
+  }
+
+  if (flagEnter and millis() > afterSolenoidMillis + 5000)
+  {
+    Serial.println("STATE RECORD SELESAI");
+    division = valueInterval / counterBeep;
+    Serial.printf("val:%d counter:%d bagi:%f\n", valueInterval, counterBeep, division);
+    last_pos = 0;
+    begin_pos = 0;
+    counterBeep = 0;
+    valueInterval = 0;
+    solenoidMillis = millis();
+    flagEnter = false;
+  }
 }
 
 void loop()
 {
-  if (!mqtt.connected() /*and status == Status::IDLE*/)
-  {
-    reconnect();
-  }
-  AlarmDetected();
-  mqtt.loop();
+  // SoundLooping();
+
+  // SoundDetectValidasi();
+
+  // SoundLooping();
+  // if(detectedGagal)
+  //   soundValidasiCnt++;
+  //   else
+  //   soundValidasiCnt = 0;
+  // Serial.print(SoundPeak);
+  // Serial.print(" ");
+  // Serial.println(soundValidasiCnt);
+
+  //////===========LOGIC DETEKSI===========//
+  // detected_pos = counterNew - last_pos;
+  // detected_pos1 = last_pos - begin_pos;
+
+  // bolprevVal = bolnowVal;
+  // bolnowVal = bolnexVal;
+  // bolnexVal = SoundPeak == bin1 || (SoundPeak == bin1 + 1 || SoundPeak == bin1 - 1);
+
+  // if ((bolprevVal < bolnowVal))
+  // {
+  //   begin_pos = counterNew;
+  // }
+  // // else if ((bolprevVal < bolnowVal) and (bolnowVal > bolnexVal))
+  // // {
+  // //   last_pos = counterNew;
+  // // }
+  // else if (bolnowVal > bolnexVal)
+  // {
+  //   last_pos = counterNew;
+  //   counterBeep++;
+  //   valueInterval += last_pos - begin_pos;
+  // }
+  // else
+  //   counterNew++;
+  //////===========LOGIC DETEKSI===========//
+
+  // Serial.print(SoundPeak);
+  // Serial.print(" ");
+  // Serial.print(detected_pos);
+  // Serial.print(" ");
+  // Serial.print(abs(detected_pos1));
+  // Serial.print(" ");
+  // Serial.print(abs(detected_pos1));
+  // Serial.print(" ");
+  // Serial.println(valueInterval);
 }
