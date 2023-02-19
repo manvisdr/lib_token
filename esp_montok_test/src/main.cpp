@@ -8,7 +8,6 @@
 #include "esp_bt_device.h"
 #include <PubSubClient.h>
 #include <Wire.h>
-#include <Preferences.h>
 // #include <ElegantOTA.h>
 #include "esp_camera.h"
 #include "EEPROM.h"
@@ -46,7 +45,7 @@
 
 char *nameFileName = "/event.log";
 
-#define USE_SOLENOID
+// #define USE_SOLENOID
 // #define USE_LOG
 // #define USE_logger
 #ifdef USE_logger
@@ -82,7 +81,6 @@ Task wifi_connect_task(WIFI_CONNECT_INTERVAL, TASK_FOREVER, &wifi_connect_cb);
 Task wifi_watchdog_task(WIFI_WATCHDOG_INTERVAL, TASK_FOREVER, &wifi_watchdog_cb);
 // Task runner
 Scheduler wifiReconRunner;
-Preferences EepromStatus;
 
 AlarmId pingTime;
 AlarmId pingTimeSend;
@@ -90,13 +88,15 @@ int counterPing;
 Adafruit_MCP23017 mcp;
 int counter = 0;
 bool soundGagalTimeout = false;
+int counterUpload = 0;
+int counterAlarm;
 
 const char *ntpServer = "0.id.pool.ntp.org";
 char *statusFileSpiffs = "/status.jpg";
 char *nominalFileSpiffs = "/Nominal.jpg";
 char *saldoFileSpiffs = "/saldo.jpg";
 
-const int sizeLog = 10000;
+const int sizeLog = 20000;
 char logChar[sizeLog];
 String StrSoundValidasi;
 
@@ -110,6 +110,7 @@ bool CaptureStatus = false;
 bool CaptureSaldo = false;
 
 bool newToken = false;
+bool signalFlag;
 
 #define EEPROM_SIZE 128
 
@@ -153,6 +154,7 @@ bool newToken = false;
 
 #define I2CADDR 0x20
 
+int timeoutUpload = 10000;
 SettingsManager settings;
 BluetoothSerial SerialBT;
 WiFiClient wificlient;
@@ -163,24 +165,10 @@ IPAddress customServer(203, 194, 112, 238);
 Timeout timergagal;
 Timeout timer;
 Timeout TimeKwhAlarm;
-#define ITRON
-// #define HEXING
-#ifdef ITRON
-int delayStatus = 700;
-int delayNominal = 1700;
-int delaySaldo = 4000;
-int freqPeak = 186; // kantor 182, pak ferdi 186
-#endif
-#ifdef HEXING
-int delayStatus = 1100;
-int delayNominal = 5200;
-int delaySaldo = 11000;
-int freqPeak = 117;
-#endif
 
 #define TIMEOUT_SUARA 600
 
-const int delaySolenoid = 500;
+const int delaySolenoid = 200;
 const int delaySolenoidCalib = 500;
 long validasiStartTimer;
 long afterSolenoid;
@@ -251,6 +239,12 @@ char topicREQfreq[50];
 char topicREQKalibrasi[50];
 char topicREQLogFile[50];
 
+char topicRSPtimeStatus[50];
+char topicRSPtimeNomi[50];
+char topicRSPstatusSound[50];
+char topicRSPfreq[50];
+char topicRSPAlarm[50];
+
 char topicRSPSoundStatus[50];
 char topicRSPSoundAlarm[50];
 char topicRSPSoundPeak[50];
@@ -302,6 +296,21 @@ static unsigned long lastTrigger[2] = {0, 0};
 float loudness;
 int soundValidasiCnt;
 int soundValidasiCnts;
+
+bool bolprevAlarmSound;
+bool bolnowAlarmSound;
+bool bolnexAlarmSound;
+int prevValidSound;
+int nowValidSound;
+bool bolprevValidSound;
+bool bolnowValidSound;
+bool bolnexValidSound;
+bool outValidSound;
+int counterValidasiSound;
+int beginCnt;
+int lastCnt;
+int counterBeep;
+int valueInterval;
 
 boolean detectShort = false;
 boolean detectLong = false;
@@ -748,8 +757,10 @@ void CheckPingBackground(void *parameter)
 
 void dummySignalSend()
 {
-
-  MqttCustomPublish(topicRSPSignal, "3");
+  if (signalFlag)
+    MqttCustomPublish(topicRSPSignal, "3");
+  else
+    MqttCustomPublish(topicRSPSignal, "2");
   // counterPing = 0;
 }
 
@@ -782,7 +793,7 @@ void BluetoothCallback(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)
       {
         strcpy(ssidBuffer, sPtr[0]);
         strcpy(passBuffer, sPtr[1]);
-        Serial.printf("DATA BT: ssid=%s pass=%s kwhstat=%s kwhnomi=%s kwhfreq=%s kwhstatusbeep=%s kwhstatusbeep=%s\n",
+        Serial.printf("DATA BT: ssid=%s pass=%s kwhstat=%s kwhnomi=%s kwhfreq=%s kwhstatusbeep=%s kwhalarm=%s\n",
                       sPtr[0], sPtr[1], sPtr[2], sPtr[3], sPtr[5], sPtr[6], sPtr[7]);
         kwhstat = atoi(sPtr[2]);
         kwhnomi = atoi(sPtr[3]);
@@ -1406,6 +1417,7 @@ void SoundLooping()
   // calculate loudness per octave + A weighted loudness
   loudness = calculateLoudness(energy, aweighting, OCTAVES, 1.0);
   SoundPeak = (int)floor(fft.MajorPeak());
+  // Serial.println(SoundPeak);
 }
 
 void callback(char *topic, byte *payload, unsigned int length)
@@ -1424,8 +1436,8 @@ void callback(char *topic, byte *payload, unsigned int length)
   strcpy(received_topic, topic);
   received_msg = true;
   received_length = length;
-  // Serial.printf("received_topic %s received_length = %d \n", received_topic, received_length);
-  // Serial.printf("received_payload %s \n", received_payload);
+  Serial.printf("received_topic %s received_length = %d \n", received_topic, received_length);
+  Serial.printf("received_payload %s \n", received_payload);
   // Serial.printf("%s", urlencode(logChar));
 }
 
@@ -1543,13 +1555,14 @@ void MqttReconnect()
       Serial.println(" try again in 5 seconds");
       // Wait 5 seconds before retrying
       // delay(5000);
-      counterReconnect++;
-      Serial.println(counterReconnect);
-      if (counterReconnect > 5)
-      {
-        counterReconnect = 0;
-        ESP.restart();
-      }
+
+      // counterReconnect++;
+      // Serial.println(counterReconnect);
+      // if (counterReconnect > 5)
+      // {
+      //   counterReconnect = 0;
+      //   ESP.restart();
+      // }
     }
   }
 }
@@ -1705,47 +1718,15 @@ bool SoundDetectShortItronKantorGagal()
 
 bool DetectionLowToken()
 {
-  // if (SoundDetectShortItron())
-  // {
-  //   timer.start();
-  //   counter++;
-  //   Serial.printf("COUNTER SHORT DETECT : %d\n", counter);
-  //   // MqttCustomPublish(topicRSPSoundStatus, "COUNTER SOUND " + String(counter));
-  // }
-  // else if (timer.time_over())
-  // {
-  //   // Serial.print("TIMEOUT...");
-  //   // Serial.println("RESET");
-  //   counter = 0;
-  // }
-
-  // if (/* timer.time_over()  and */ counter > 7)
-  // {
-  //   MqttCustomPublish(topicRSPSoundStatus, "SEND NOTIFICATION SOUND");
-  //   // sendNotifSaldo(idDevice);
-  //   // Serial.println("DETECK LOW TOKEN");
-  //   Serial.println("SEND NOTIFICATION");
-  //   counter = 0;
-  // }
-  // return true;
-  // Serial.println("IDLE");
-
-  // if (received_msg and (strcmp(received_topic, topicREQToken) == 0) and received_length == 5)
-  // {
-  //   CaptureAndSendNotif();
-  // }
 
   if (SoundDetectShortItron())
   {
     timer.start(6000);
     prevAlarmStatus = true;
     counter++;
-
+    Serial.printf("Frekuensi Detected. Counter %d\n", counter);
     // Serial.printf("COUNTER SHORT DETECT : %d\n", counter);
     MqttCustomPublish(topicRSPSoundAlarmCnt, String(counter));
-    // MqttCustomPublish(topicRSPSoundPeak, String(SoundPeak));
-    // MqttCustomPublish(topicRSPSoundAlarmCnt, String(counter));
-    // MqttCustomPublish(topicRSPSoundStatus, "COUNTER SOUND " + String(counter));
   }
   else if (timer.time_over())
   {
@@ -1754,18 +1735,12 @@ bool DetectionLowToken()
     prevAlarmStatus = false;
     // timeAlarm = false;
   }
-  // else
-  // {
-  //   counter = 0;
-  //   AlarmStatus = false;
-  //   prevAlarmStatus = false;
-  //   timeAlarm = false;
-  // }
 
-  if (counter > 10)
+  if (counter > 30)
   {
     AlarmStatus = true;
-    prevAlarmStatus = true;
+    MqttPublishResponse("Work: Low Saldo Detected");
+
     // MqttCustomPublish(topicRSPSoundAlarm, String(counter));
     // counter = 0;
     // prevAlarmStatus = false;
@@ -1774,67 +1749,111 @@ bool DetectionLowToken()
 
   if (TimeKwhAlarm.time_over())
   {
-    // MqttCustomPublish("KWHALARM", "SEND NOTIF");
-    timeAlarm = true;
+    Serial.println("COUNTDOWN TIME OVER");
+    if (counter == 0)
+    {
+      Serial.println("COUNTDOWN START , COUNTER 0");
+      TimeKwhAlarm.start(kwhalarmbuff);
+    }
+    else if (counter > 12)
+    {
+      Serial.println("COUNTDOWN TIME OVER, TIME ALARM TRUE");
+      timeAlarm = true;
+    }
   }
 
-  if ((AlarmStatus and timeAlarm) or (prevAlarmStatus and timeAlarm))
+  if (AlarmStatus and timeAlarm)
   {
     // MqttCustomPublish(topicRSPSoundStatus, "SEND NOTIFICATION SOUND");
-    // sendNotifSaldo(idDevice);
-    // MqttPublishResponse("Send: Upload Low Saldo");
+    // MqttCustomPublish(topicRSPStatus, "SEND NOTIFICATION SOUND");
     CaptureAndSendNotif();
+    MqttPublishResponse("Send: Upload Low Saldo");
+#ifdef USE_LOG
+    logFile_i("Notif Low Saldo", "", __FUNCTION__, __LINE__);
+#endif
+    logNew("Send Notif Low Saldo", __FUNCTION__, __LINE__, "", "");
     Serial.println("SEND NOTIFICATION");
+
     counter = 0;
     AlarmStatus = false;
     prevAlarmStatus = false;
     timeAlarm = false;
     TimeKwhAlarm.start(kwhalarmbuff);
-    // MqttPublishResponse("Idle");
   }
-  // else
-  // {
-  //   counter = 0;
-  //   AlarmStatus = false;
-  //   prevAlarmStatus = false;
-  //   timeAlarm = false;
-  //   TimeKwhAlarm.start(kwhalarmbuff);
-  // }
+
   return false;
 }
 
-// int SoundDetectValidasi()
-// {
-//   int returnValue;
-//   long startTimer = millis();
-//   while (millis() < startTimer + TIMEOUT_SUARA)
-//   {
-//     SoundLooping();
-//     bool detectedGagal = detectFrequency(&soundValidasi, 2, SoundPeak, freqPeak, 196, true);
+int DetectLowTokenV2()
+{
+  SoundLooping();
+  bolprevAlarmSound = bolnowAlarmSound;
+  bolnowAlarmSound = bolnexAlarmSound;
+  bolnexAlarmSound = SoundPeak == kwhfreqbuff || (SoundPeak == kwhfreqbuff + 1 || SoundPeak == kwhfreqbuff - 1);
+  if (bolprevAlarmSound < bolnowAlarmSound and bolnowAlarmSound > bolnexAlarmSound)
+  {
+    timer.start(6000);
+    prevAlarmStatus = true;
+    counterAlarm++;
+  }
+  //  if (bolnowVal > bolnexVal)
+  // {
+  //   counterAlarm++;
+  // }
+  // else
+  //   return counterAlarm = 0;
+  else if (timer.time_over())
+  {
+    counterAlarm = 0;
+    AlarmStatus = false;
+    prevAlarmStatus = false;
+    // timeAlarm = false;
+  }
 
-//     MqttCustomPublish(topicRSPSoundPeak, String(SoundPeak));
-//     MqttCustomPublish(topicRSPSoundAlarmCnt, String(cntDetected));
-//     if (detectedGagal)
-//     {
-//       cntDetected++;
-//     }
-//     else
-//     {
-//       soundValidasiCnt = cntDetected;
-//       // Serial.println(detectCntItronGagal);
-//       cntDetected = 0;
-//       // Serial.println(detectCntItronGagal);
-//       // detectCntItronGagal = 0;
-//       // Serial.println("DETECK INVALID");
-//       // break;
-//     }
-//     // returnValue = soundValidasiCnt;
-//   }
-//   // cntDetected = 0;
-//   // soundValidasi = cntDetected;
-//   // cntDetected = 0;
-//   return cntDetected;
-// }
+  if (counterAlarm > 30)
+  {
+    AlarmStatus = true;
+
+    // MqttCustomPublish(topicRSPSoundAlarm, String(counter));
+    // counter = 0;
+    // prevAlarmStatus = false;
+    // timeAlarm = false;
+  }
+
+  if (TimeKwhAlarm.time_over())
+  {
+    Serial.println("COUNTDOWN TIME OVER");
+    if (counterAlarm == 0)
+    {
+      Serial.println("COUNTDOWN START , COUNTER 0");
+      TimeKwhAlarm.start(kwhalarmbuff);
+    }
+    else if (counterAlarm > 12)
+    {
+      Serial.println("COUNTDOWN TIME OVER, TIME ALARM TRUE");
+      timeAlarm = true;
+    }
+  }
+
+  if (AlarmStatus and timeAlarm)
+  {
+    CaptureAndSendNotif();
+#ifdef USE_LOG
+    logFile_i("Notif Low Saldo", "", __FUNCTION__, __LINE__);
+    logNew("Send Notif Low Saldo", __FUNCTION__, __LINE__, "", "");
+#endif
+    //
+    Serial.println("SEND NOTIFICATION");
+
+    counterAlarm = 0;
+    AlarmStatus = false;
+    prevAlarmStatus = false;
+    timeAlarm = false;
+    TimeKwhAlarm.start(kwhalarmbuff);
+  }
+
+  return false;
+}
 
 int SoundDetectValidasi()
 {
@@ -1842,12 +1861,16 @@ int SoundDetectValidasi()
   SoundLooping();
   bool detectedGagal = detectFrequency(&soundValidasi, 2, SoundPeak, kwhfreqbuff, 196, true);
 
-  MqttCustomPublish(topicRSPSoundPeak, String(SoundPeak));
-  MqttCustomPublish(topicRSPSoundStatusVal, String(soundValidasiCnt));
+  // MqttCustomPublish(topicRSPSoundPeak, String(SoundPeak));
+  // MqttCustomPublish(topicRSPSoundStatusVal, String(soundValidasiCnt));
   if (detectedGagal /* and loudness > 40 */)
   {
     soundValidasiCnt++;
+    // Serial.println(soundValidasiCnt);
   }
+  Serial.print(SoundPeak);
+  Serial.print(" ");
+  Serial.println(soundValidasiCnt);
   // else
   // {
   //   soundValidasiCnt = 0;
@@ -1862,39 +1885,116 @@ int SoundDetectValidasi()
   return soundValidasiCnt;
 }
 
+void SoundDetectValidasiV2()
+{
+  SoundLooping();
+
+  bolprevValidSound = bolnowValidSound;
+  bolnowValidSound = bolnexValidSound;
+  bolnexValidSound = SoundPeak == kwhfreqbuff || (SoundPeak == kwhfreqbuff + 1 || SoundPeak == kwhfreqbuff - 1);
+
+  if ((bolprevValidSound < bolnowValidSound))
+  {
+    beginCnt = counterValidasiSound;
+  }
+
+  else if (bolnowValidSound > bolnexValidSound)
+  {
+    lastCnt = counterValidasiSound;
+    counterBeep++;
+    valueInterval += lastCnt - beginCnt;
+  }
+  else
+    counterValidasiSound++;
+
+  Serial.print(SoundPeak);
+  Serial.print(" ");
+  Serial.print(beginCnt);
+  Serial.print(" ");
+  Serial.print(lastCnt);
+  Serial.print(" ");
+  Serial.print(valueInterval);
+  Serial.print(" ");
+  Serial.println(counterBeep);
+}
+
 String OutputSoundValidasi(int val)
 {
   String out;
   if (kwhstatusbeepbuff == 1)
   {
-    if (val != 0 && val < 25)
+    if (val == 0)
     {
-      Serial.println("DETECK BENAR");
-      MqttCustomPublish(topicRSPSoundStatus, "VALIDASI SUARA BENAR");
-      out = "success";
+      Serial.println("DETECK INVALID");
+      // MqttCustomPublish(topicRSPSoundStatus, "VALIDASI SUARA INVALID");
+      out = "invalid";
     }
-    else if (val > 25)
+    if (val > 60)
     {
       Serial.println("DETECK GAGAL");
-      MqttCustomPublish(topicRSPSoundStatus, "VALIDASI SUARA GAGAL");
+      // MqttCustomPublish(topicRSPSoundStatus, "VALIDASI SUARA GAGAL");
       out = "failed";
     }
     else
     {
+      Serial.println("DETECK BENAR");
+      // MqttCustomPublish(topicRSPSoundStatus, "VALIDASI SUARA BENAR");
+      out = "success";
+    }
+  }
+  else
+  {
+    Serial.println("DETECK INVALID");
+    // MqttCustomPublish(topicRSPSoundStatus, "VALIDASI SUARA INVALID");
+    out = "invalid";
+  }
+  soundValidasiCnt = 0;
+  soundValidasiCnts = 0;
+  return out;
+}
+
+String OutputSoundValidasiV2()
+{
+  String out;
+  if (kwhstatusbeepbuff == 1)
+  {
+    if (valueInterval != 0 and valueInterval < 10 and counterBeep <= 3)
+    {
+      Serial.println("DETECK BENAR");
+      // MqttCustomPublish(topicRSPSoundStatus, "VALIDASI SUARA BENAR");
+      out = "success";
+    }
+    else if (valueInterval > 10 and counterBeep >= 2)
+    {
+      Serial.println("DETECK GAGAL");
+      // MqttCustomPublish(topicRSPSoundStatus, "VALIDASI SUARA GAGAL");
+      out = "failed";
+    }
+    else if (valueInterval == 0 and counterBeep == 0)
+    {
       Serial.println("DETECK INVALID");
-      MqttCustomPublish(topicRSPSoundStatus, "VALIDASI SUARA INVALID");
+      // MqttCustomPublish(topicRSPSoundStatus, "VALIDASI SUARA INVALID");
+      out = "invalid";
+    }
+    else
+    {
+      Serial.println("DETECK INVALID");
+      // MqttCustomPublish(topicRSPSoundStatus, "VALIDASI SUARA INVALID");
       out = "invalid";
     }
   }
   else
   {
     Serial.println("DETECK INVALID");
-    MqttCustomPublish(topicRSPSoundStatus, "VALIDASI SUARA INVALID");
+    // MqttCustomPublish(topicRSPSoundStatus, "VALIDASI SUARA INVALID");
     out = "invalid";
   }
-  soundValidasiCnt = 0;
-  soundValidasiCnts = 0;
-  return out;
+  Serial.printf("Value Beep:%d Beep Pattern:%d \n", valueInterval, counterBeep);
+  lastCnt = 0;
+  beginCnt = 0;
+  counterBeep = 0;
+  valueInterval = 0;
+  Serial.println("END VALIDASI SUARA");
 }
 
 void GetKwhProcess()
@@ -2171,7 +2271,7 @@ String sendImageNominal(char *filename, char *token)
   // nominalFile.close();
   // fileSys.end();
   // webClient.write(imageData, len);
-
+  bool flagTimeout;
   Serial.println("Uploading Nominal...");
   postClient.setTimeout(30);
   if (postClient.connect(SERVER.c_str(), PORT))
@@ -2181,29 +2281,30 @@ String sendImageNominal(char *filename, char *token)
 
     const size_t bufferSize = 256;
     uint8_t buffer[bufferSize];
-    long timenow = millis() + 10000;
-    Serial.println(timenow);
+    long timenow = millis() + timeoutUpload;
+    Serial.printf("timenow = %d\n", timenow);
+
     while (nominalFile.available() /*and !millis() > timenow*/)
     {
       size_t n = nominalFile.readBytes((char *)buffer, bufferSize);
-      // Serial.println(n);
+      Serial.println(millis());
       if (millis() > timenow)
+      {
+        flagTimeout = true;
         break;
+      }
       if (n != 0)
       {
         postClient.write(buffer, n);
         postClient.flush();
-        // Serial.println(millis());
       }
-      // if (millis() == timenow)
-      //       break;
       else
       {
         Serial.println(F("Buffer was empty"));
-        break;
       }
     }
-
+    if (flagTimeout)
+      Serial.println("Timeout....");
     postClient.print("\r\n" + bodyEnd);
     nominalFile.close();
     fileSys.end();
@@ -2228,7 +2329,8 @@ String sendImageNominal(char *filename, char *token)
     return serverRes;
     // return String("UPLOADED");
   }
-  // else
+  else
+    return "failed";
   // {
   //   if (postClient.connect(SERVER.c_str(), PORT))
   //   {
@@ -2310,7 +2412,7 @@ String sendImageSaldo(char *filename, char *token)
   fileSys.begin();
   saldoFile = fileSys.open(filename); // change to your file name
   size_t filesize = saldoFile.size();
-
+  bool flagTimeout;
   String bodySaldo = body_Saldo();
   String bodyEnd = String("--") + BOUNDARY + String("--\r\n");
   size_t allLen = bodySaldo.length() + filesize + bodyEnd.length();
@@ -2325,29 +2427,32 @@ String sendImageSaldo(char *filename, char *token)
     //   postClient.write(saldoFile.read());
     const size_t bufferSize = 256;
     uint8_t buffer[bufferSize];
-    long timenow = millis() + 10000;
+    long timenow = millis() + timeoutUpload;
     Serial.println(timenow);
     while (saldoFile.available() /*and !millis() > timenow*/)
     {
       size_t n = saldoFile.readBytes((char *)buffer, bufferSize);
       // Serial.println(n);
       if (millis() > timenow)
+      {
+        flagTimeout = true;
         break;
+      }
       if (n != 0)
       {
         postClient.write(buffer, n);
         postClient.flush();
         // Serial.println(millis());
       }
-      // if (millis() == timenow)
-      //       break;
+
       else
       {
         Serial.println(F("Buffer was empty"));
         break;
       }
     }
-
+    if (flagTimeout)
+      Serial.println("Timeout..");
     postClient.print("\r\n" + bodyEnd);
     saldoFile.close();
     fileSys.end();
@@ -2374,8 +2479,8 @@ String sendImageSaldo(char *filename, char *token)
     // postClient.stop();
     // return String("UPLOADED");
   }
-  // else
-  // {
+  else
+    return "failed";
   //   if (postClient.connect(SERVER.c_str(), PORT))
   //   {
   //     postClient.print(headerTxt + bodySaldo);
@@ -2458,7 +2563,7 @@ String sendImageStatusToken(char *filename, String status, char *token, char *sn
   fileSys.begin();
   statusFile = fileSys.open(filename); // change to your file name
   size_t filesize = statusFile.size();
-
+  bool flagTimeout;
   String bodySatus = body_StatusToken();
   String bodyEnd = String("--") + BOUNDARY + String("--\r\n");
   size_t allLen = bodySatus.length() + filesize + bodyEnd.length();
@@ -2472,14 +2577,17 @@ String sendImageStatusToken(char *filename, String status, char *token, char *sn
 
     const size_t bufferSize = 256;
     uint8_t buffer[bufferSize];
-    long timenow = millis() + 10000;
+    long timenow = millis() + timeoutUpload;
     Serial.println(timenow);
     while (statusFile.available() /*and !millis() > timenow*/)
     {
       size_t n = statusFile.readBytes((char *)buffer, bufferSize);
       // Serial.println(n);
       if (millis() > timenow)
+      {
+        flagTimeout = true;
         break;
+      }
       if (n != 0)
       {
         postClient.write(buffer, n);
@@ -2487,6 +2595,8 @@ String sendImageStatusToken(char *filename, String status, char *token, char *sn
 
         // Serial.println(millis());
       }
+      // if (!postClient.connect(SERVER.c_str(), PORT))
+      //       return "failed";
       else
       {
         Serial.println(F("Buffer was empty"));
@@ -2497,6 +2607,8 @@ String sendImageStatusToken(char *filename, String status, char *token, char *sn
     // {
     //   postClient.write(statusFile.read());
     // }
+    if (flagTimeout)
+      Serial.println("Timeout..");
     postClient.print("\r\n" + bodyEnd);
     statusFile.close();
     fileSys.end();
@@ -2516,6 +2628,8 @@ String sendImageStatusToken(char *filename, String status, char *token, char *sn
     return serverRes;
     // return String("UPLOADED");
   }
+  else
+    return "failed";
 }
 
 bool CaptureToSpiffs(String path, uint8_t *data_pic, size_t size_pic)
@@ -2555,19 +2669,23 @@ void ReceiveAlarm(/*char *token*/)
 
     buffTimeAlarm = atoi(received_payload) * 60000;
     if (kwhalarmbuff == buffTimeAlarm)
-      Serial.print("SAME ALARM SETTING");
+      Serial.print("SAME ALARM SETTING\n");
     else
     {
+      logNew("Receive New Alarm Value:", __FUNCTION__, __LINE__, received_payload, "");
       Serial.print("RECEIVE NEW DEVICE SETTING");
       Serial.println(buffTimeAlarm);
       kwhalarmbuff = buffTimeAlarm;
       Serial.print("VALID MILLIS: ");
       Serial.println(kwhalarmbuff);
       SettingsSaveMqttSetting(kwhtimestatbuff, kwhtimenomibuff, kwhfreqbuff, kwhalarmbuff, kwhstatusbeepbuff);
-
+#ifdef USE_LOG
+      logFile_i("Receive New Alarm Value: ", (char *)String(kwhalarmbuff).c_str(), __FUNCTION__, __LINE__);
+#endif
       TimeKwhAlarm.time_over();
       TimeKwhAlarm.start(kwhalarmbuff);
     }
+    MqttCustomPublish(topicRSPAlarm, String(kwhalarmbuff));
     received_msg = false;
     status = Status::IDLE;
   }
@@ -2581,14 +2699,19 @@ void ReceiveTimeStatus(/*char *token*/)
     int buffTimeStatus;
     buffTimeStatus = atoi(received_payload);
     if (kwhtimestatbuff == buffTimeStatus)
-      Serial.print("SAME TIME STATUS SETTING");
+      Serial.print("SAME TIME STATUS SETTING\n");
     else
     {
+      logNew("Receive New Delay Status Setting : ", __FUNCTION__, __LINE__, received_payload, "");
       Serial.print("RECEIVE NEW TIME STATUS");
       Serial.println(buffTimeStatus);
       kwhtimestatbuff = buffTimeStatus;
       SettingsSaveMqttSetting(kwhtimestatbuff, kwhtimenomibuff, kwhfreqbuff, kwhalarmbuff, kwhstatusbeepbuff);
+#ifdef USE_LOG
+      logFile_i("Receive New TimeStatus Value: ", (char *)String(kwhtimestatbuff).c_str(), __FUNCTION__, __LINE__);
+#endif
     }
+    MqttCustomPublish(topicRSPtimeStatus, String(kwhtimestatbuff));
     received_msg = false;
     status = Status::IDLE;
   }
@@ -2602,14 +2725,19 @@ void ReceiveTimeNominal(/*char *token*/)
     int buffTimeNomi;
     buffTimeNomi = atoi(received_payload);
     if (kwhtimenomibuff == buffTimeNomi)
-      Serial.print("SAME TIME NOMI SETTING");
+      Serial.print("SAME TIME NOMI SETTING\n");
     else
     {
+      logNew("Receive New Delay Nominal Setting : ", __FUNCTION__, __LINE__, received_payload, "");
       Serial.print("RECEIVE NEW TIME NOMINAL");
       Serial.println(buffTimeNomi);
       kwhtimenomibuff = buffTimeNomi;
       SettingsSaveMqttSetting(kwhtimestatbuff, kwhtimenomibuff, kwhfreqbuff, kwhalarmbuff, kwhstatusbeepbuff);
+#ifdef USE_LOG
+      logFile_i("Receive New TimeNominal Value: ", (char *)String(kwhtimenomibuff).c_str(), __FUNCTION__, __LINE__);
+#endif
     }
+    MqttCustomPublish(topicRSPtimeNomi, String(kwhtimenomibuff));
     received_msg = false;
     status = Status::IDLE;
   }
@@ -2623,14 +2751,19 @@ void ReceiveStatusSound(/*char *token*/)
     int buffStatusSound;
     buffStatusSound = atoi(received_payload);
     if (kwhstatusbeepbuff == buffStatusSound)
-      Serial.print("SAME STATUS BEEP SETTING");
+      Serial.print("SAME STATUS BEEP SETTING\n");
     else
     {
+      logNew("Receive New Status Sound Setting : ", __FUNCTION__, __LINE__, received_payload, "");
       Serial.print("RECEIVE NEW STATUS SOUND");
       Serial.println(buffStatusSound);
       kwhstatusbeepbuff = buffStatusSound;
       SettingsSaveMqttSetting(kwhtimestatbuff, kwhtimenomibuff, kwhfreqbuff, kwhalarmbuff, kwhstatusbeepbuff);
+#ifdef USE_LOG
+      logFile_i("Receive New StatusSound Value: ", (char *)String(kwhstatusbeepbuff).c_str(), __FUNCTION__, __LINE__);
+#endif
     }
+    MqttCustomPublish(topicRSPstatusSound, String(kwhstatusbeepbuff));
     received_msg = false;
     status = Status::IDLE;
   }
@@ -2644,17 +2777,32 @@ void ReceiveFreq(/*char *token*/)
     int buffFreq;
     buffFreq = atoi(received_payload);
     if (kwhfreqbuff == buffFreq)
-      Serial.print("SAME FREKUENSI SETTING");
+      Serial.print("SAME FREKUENSI SETTING\n");
     else
     {
+      logNew("Receive New Frekuensi Setting : ", __FUNCTION__, __LINE__, received_payload, "");
       Serial.print("RECEIVE NEW FREKUENSI");
       Serial.println(buffFreq);
       kwhfreqbuff = buffFreq;
+
       SettingsSaveMqttSetting(kwhtimestatbuff, kwhtimenomibuff, kwhfreqbuff, kwhalarmbuff, kwhstatusbeepbuff);
+#ifdef USE_LOG
+      logFile_i("Receive New Freq Value: ", (char *)String(kwhfreqbuff).c_str(), __FUNCTION__, __LINE__);
+#endif
     }
+    MqttCustomPublish(topicRSPfreq, String(kwhfreqbuff));
     received_msg = false;
     status = Status::IDLE;
   }
+}
+
+void RespondParameter()
+{
+  MqttCustomPublish(topicRSPstatusSound, String(kwhstatusbeepbuff));
+  MqttCustomPublish(topicRSPtimeNomi, String(kwhtimenomibuff));
+  MqttCustomPublish(topicRSPtimeStatus, String(kwhtimestatbuff));
+  MqttCustomPublish(topicRSPfreq, String(kwhfreqbuff));
+  MqttCustomPublish(topicRSPAlarm, String(kwhalarmbuff / 60000));
 }
 
 void UploadBuktiTokenProcess()
@@ -2712,23 +2860,36 @@ bool UploadBuktiTokenProcessv2()
     flagUploadNominal = true;
   }
   else
+  {
+    Serial.println("--Upload Nominal Failed--");
     flagUploadNominal = false;
+  }
+
   yield();
+
   if (sendImageSaldo(saldoFileSpiffs, received_payload) == "HTTP/1.1 200 OK")
   {
     Serial.println("Upload Saldo Sucess");
     flagUploadSaldo = true;
   }
   else
+  {
+    Serial.println("--Upload Saldo Failed--");
     flagUploadSaldo = false;
+  }
+
   yield();
+
   if (sendImageStatusToken(statusFileSpiffs, StrSoundValidasi, received_payload, idDevice) == "HTTP/1.1 200 OK")
   {
     Serial.println("Upload Status Sucess");
     flagUploadStatus = true;
   }
   else
+  {
+    Serial.println("--Upload Status Failed--");
     flagUploadStatus = false;
+  }
 
   if (flagUploadSaldo and flagUploadNominal and flagUploadStatus)
     return true;
@@ -2894,9 +3055,7 @@ void TokenProcess(/*char *token*/)
     // MqttPublishStatus("SELENOID ENTER ON");
     // MqttPublishResponse("Work: Type Solenoid Enter");
     Serial.println("ENTER");
-    // delay(delayStatus);
     // validasiStartTimer = millis();
-
     afterSolenoid = millis();
     Serial.printf("afterSolenoid =%d\n", afterSolenoid);
     received_msg = false;
@@ -2907,15 +3066,14 @@ void TokenProcess(/*char *token*/)
   if (status == Status::PROCCESS_TOKEN and millis() < afterSolenoid + kwhtimestatbuff)
   {
     camera_fb_t *fbs;
-    Serial.printf("millis() =%d RecordValidasiSound()\n", millis());
 
     if (kwhstatusbeepbuff = 1)
-      soundValidasiCnts = SoundDetectValidasi();
+      SoundDetectValidasiV2();
     if (millis() > afterSolenoid + ((kwhtimestatbuff / 2) + 100) and
         millis() < afterSolenoid + kwhtimestatbuff and TokenStateStatus)
     {
-      // digitalWrite(4, HIGH);
-      StrSoundValidasi = OutputSoundValidasi(soundValidasiCnts);
+      Serial.printf("millis() =%d RecordValidasiSound()\n", millis());
+
 #ifdef USE_LOG
       logFile_i("Sound Validasi", (char *)outputvalid.c_str(), __FUNCTION__, __LINE__);
       fileSys.end();
@@ -2978,9 +3136,10 @@ void TokenProcess(/*char *token*/)
       millis() > (afterSolenoid + kwhtimestatbuff) + (kwhtimenomibuff - 200) and
       TokenStateNominal)
   {
-    Serial.printf("millis() =%d CaptureNominal()\n", millis());
+
     if (TokenStateNominal)
     {
+      Serial.printf("millis() =%d CaptureNominal()\n", millis());
       Serial.println("CAPTURING NOMINAL");
       String res;
       camera_fb_t *fb = NULL;
@@ -3050,7 +3209,6 @@ void TokenProcess(/*char *token*/)
 #ifdef USE_logger
       logger.append("Capture Image Nominal", 1);
 #endif
-
       // logString = logString + "Capture%20Image%20Nominal%5Cn";
       if (!fb)
       {
@@ -3072,9 +3230,7 @@ void TokenProcess(/*char *token*/)
 #ifdef USE_logger
         logger.append("Upload Image Nominal", 1);
 #endif
-
         // logString = logString + "Upload%20Image%20Nominal%5Cn";
-
         esp_camera_fb_return(fb);
       }
       TokenStateNominal = false;
@@ -3087,9 +3243,10 @@ void TokenProcess(/*char *token*/)
   if (status == Status::PROCCESS_TOKEN and
       millis() > (afterSolenoid + kwhtimestatbuff) + (kwhtimenomibuff + 2000) and TokenStateSaldo)
   {
-    Serial.printf("millis() =%d CaptureSaldo()\n", millis());
+
     if (TokenStateSaldo)
     {
+      Serial.printf("millis() =%d CaptureSaldo()\n", millis());
       Serial.println("CAPTURING SALDO");
       String res;
       camera_fb_t *fb = NULL;
@@ -3127,7 +3284,6 @@ void TokenProcess(/*char *token*/)
 #ifdef USE_logger
         logger.append("Upload Image Status Token", 1);
 #endif
-
         // logString = logString + "Capture%20Image%20Saldo%5Cn";
         Serial.println(res);
         esp_camera_fb_return(fb);
@@ -3147,10 +3303,9 @@ void TokenProcess(/*char *token*/)
 
     // Serial.println(logString);
     newToken = true;
-    // if (UploadBuktiTokenProcessv2())
-    //   Serial.println("SUCCESS UPLOAD");
-    // else
-    //   Serial.println("GAGAL UPLOAD");
+    StrSoundValidasi = OutputSoundValidasiV2();
+    Serial.println(StrSoundValidasi);
+    yield();
     status = Status::IDLE;
   }
 
@@ -3749,7 +3904,8 @@ void GetLogFile(/*char *token*/)
 {
   if (received_msg and strcmp(received_topic, topicREQLogFile) == 0 and strcmp(received_payload, "now") == 0)
   {
-    UploadBuktiTokenProcess();
+    // UploadBuktiTokenProcess();
+    newToken = true;
     received_msg = false;
     status = Status::IDLE;
   }
@@ -3907,8 +4063,7 @@ void logNew(char *message, const char *function, int line, char *msg1, char *msg
 void setup()
 {
   Serial.begin(115200);
-  EepromStatus.begin("uploadStatus", false);
-  flagUploadFile = EepromStatus.getUInt("uploadStatus", 0);
+
   SettingsInit();
   if (fileSys.begin())
   {
@@ -3946,8 +4101,10 @@ void setup()
   KoneksiInit();
   WifiInit();
   CameraInit();
+  yield();
   delay(1000);
   SoundInit();
+  yield();
 #ifdef USE_SOLENOID
   MechanicInit();
 #endif
@@ -3955,10 +4112,9 @@ void setup()
   mqtt.setServer(mqttServer, 1883);
   mqtt.setCallback(callback);
   MqttTopicInit();
-  // pftime::configTzTime(PSTR("WIB-7"), ntpServer);
-
-  // Alarm.timerOnce(10, dummySignalSend);
-  // Alarm.timerRepeat(25, CheckPingGateway);
+  // // pftime::configTzTime(PSTR("WIB-7"), ntpServer);
+  // // Alarm.timerOnce(10, dummySignalSend);
+  // // Alarm.timerRepeat(25, CheckPingGateway);
   pingTimeSend = Alarm.timerRepeat(10, dummySignalSend /* CheckPingSend */);
   pinMode(4, OUTPUT);
   pinMode(33, OUTPUT);
@@ -3970,17 +4126,17 @@ void setup()
 
 void loop()
 {
+  if (millis() > 300000)
+    btStop();
 
-  // wifiReconRunner.execute();
-  // if (WiFi.status() == WL_CONNECTED /*and wifiReconRunner.execute()*/)
-  // {
-  if (!mqtt.connected() /*and status == Status::IDLE*/)
+  if (!mqtt.connected() and status == Status::IDLE)
   {
     MqttReconnect();
   }
   if (status == Status::IDLE)
   {
     DetectionLowToken();
+    // DetectLowTokenV2();
     ReceiveAlarm();
     ReceiveFreq();
     ReceiveStatusSound();
@@ -3992,22 +4148,28 @@ void loop()
 
     Alarm.delay(0);
   }
-  mqtt.loop();
+
+  signalFlag = mqtt.loop();
   TokenProcess();
 
-  if (WiFi.status() == WL_CONNECTED)
-  {
-    if (newToken)
-    {
-      btStop();
-      flagUploadFile = EepromStatus.putBool("uploadStatus", UploadBuktiTokenProcessv2());
-      newToken = false;
-      SerialBT.begin(bluetooth_name);
-    }
-    else if (!flagUploadFile)
-    {
-      flagUploadFile = EepromStatus.putBool("uploadStatus", UploadBuktiTokenProcessv2());
-    }
-    
-  }
+  // if (WiFi.status() == WL_CONNECTED)
+  // {
+  //   if (newToken and mqtt.connected())
+  //   {
+  //     btStop();
+  //     // UploadBuktiTokenProcessv2();
+  //     newToken = !UploadBuktiTokenProcessv2();
+  //     // newToken = false;
+
+  //     // if (counterUpload > 3)
+  //     // {
+  //     //   counterUpload = 0;
+  //     //   UploadBuktiTokenProcessv2();
+
+  //     //   newToken = false;
+  //     //   //     //     // }
+  //     // }
+
+  //   }
+  // }
 }

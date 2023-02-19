@@ -378,20 +378,21 @@ void MechanicEnter()
   MechanicTyping(11);
 }
 
-int prevVal;
-int nowVal;
-bool bolprevVal;
-bool bolnowVal;
-bool bolnexVal;
-bool outVal;
-int bin1 = 182;
+int prevValidSound;
+int nowValidSound;
+bool bolprevValidSound;
+bool bolnowValidSound;
+bool bolnexValidSound;
+bool outValidSound;
+int counterValidasiSound;
+
 bool peakAwal;
-int counterNew;
 
 int valmilis = 10000;
 long solenoidMillis;
 long afterSolenoidMillis;
 
+int bin1 = 182;
 int begin_pos;
 int last_pos;
 int detected_pos;
@@ -415,23 +416,24 @@ void setup()
   // mqtt.setCallback(callback);
 }
 
-void DeteksiAlarm()
+int DeteksiAlarm()
 {
   SoundLooping();
-  bolprevVal = bolnowVal;
-  bolnowVal = bolnexVal;
-  bolnexVal = SoundPeak == bin1 || (SoundPeak == bin1 + 1 || SoundPeak == bin1 - 1);
-  if (bolnowVal > bolnexVal)
+  bolprevValidSound = bolnowValidSound;
+  bolnowValidSound = bolnexValidSound;
+  bolnexValidSound = SoundPeak == bin1 || (SoundPeak == bin1 + 1 || SoundPeak == bin1 - 1);
+  if (bolprevValidSound < bolnowValidSound and bolnowValidSound > bolnexValidSound)
   {
     counterAlarm++;
   }
 
-  else if (bolnowVal > bolnexVal)
-  {
-    counterAlarm++;
-  }
-  else
-    counterNew++;
+  //  if (bolnowVal > bolnexVal)
+  // {
+  //   counterAlarm++;
+  // }
+  // else
+  //   return counterAlarm = 0;
+  return counterAlarm;
 }
 
 void DeteksiValidasi()
@@ -451,23 +453,23 @@ void DeteksiValidasi()
 
     SoundLooping();
 
-    bolprevVal = bolnowVal;
-    bolnowVal = bolnexVal;
-    bolnexVal = SoundPeak == bin1 || (SoundPeak == bin1 + 1 || SoundPeak == bin1 - 1);
+    bolprevValidSound = bolnowValidSound;
+    bolnowValidSound = bolnexValidSound;
+    bolnexValidSound = SoundPeak == bin1 || (SoundPeak == bin1 + 1 || SoundPeak == bin1 - 1);
 
-    if ((bolprevVal < bolnowVal))
+    if ((bolprevValidSound < bolnowValidSound))
     {
-      begin_pos = counterNew;
+      begin_pos = counterValidasiSound;
     }
 
-    else if (bolnowVal > bolnexVal)
+    else if (bolnowValidSound > bolnexValidSound)
     {
-      last_pos = counterNew;
+      last_pos = counterValidasiSound;
       counterBeep++;
       valueInterval += last_pos - begin_pos;
     }
     else
-      counterNew++;
+      counterValidasiSound++;
     // Serial.print(SoundPeak);
     // Serial.print(" ");
     // Serial.print(detected_pos);
@@ -503,6 +505,16 @@ void DeteksiValidasi()
 
 void loop()
 {
+  // int detectalarm = DeteksiAlarm();
+  // Serial.println(detectalarm);
+  // if (detectalarm > 30)
+  // {
+  //   Serial.println("ALARM DETECTED");
+  //   counterAlarm = 0;
+  // }
+
+  DeteksiValidasi();
+
   // SoundLooping();
 
   // SoundDetectValidasi();
@@ -517,29 +529,29 @@ void loop()
   // Serial.println(soundValidasiCnt);
 
   //////===========LOGIC DETEKSI===========//
-  // detected_pos = counterNew - last_pos;
+  // detected_pos = counterValidasiSound - last_pos;
   // detected_pos1 = last_pos - begin_pos;
 
-  // bolprevVal = bolnowVal;
-  // bolnowVal = bolnexVal;
+  // bolprevVal = bolnowValidSound;
+  // bolnowVal = bolnexValidSound;
   // bolnexVal = SoundPeak == bin1 || (SoundPeak == bin1 + 1 || SoundPeak == bin1 - 1);
 
   // if ((bolprevVal < bolnowVal))
   // {
-  //   begin_pos = counterNew;
+  //   begin_pos = counterValidasiSound;
   // }
   // // else if ((bolprevVal < bolnowVal) and (bolnowVal > bolnexVal))
   // // {
-  // //   last_pos = counterNew;
+  // //   last_pos = counterValidasiSound;
   // // }
   // else if (bolnowVal > bolnexVal)
   // {
-  //   last_pos = counterNew;
+  //   last_pos = counterValidasiSound;
   //   counterBeep++;
   //   valueInterval += last_pos - begin_pos;
   // }
   // else
-  //   counterNew++;
+  //   counterValidasiSound++;
   //////===========LOGIC DETEKSI===========//
 
   // Serial.print(SoundPeak);

@@ -1,0 +1,136 @@
+[2023/02/08 15:16:56.000000] INFO [TokenProcess:2861] Capture Image Nominal 
+[2023/02/08 15:17:02.000000] INFO [TokenProcess:2871] Upload Image Nominal 
+[2023/02/08 15:17:02.000000] INFO [TokenProcess:2895] Capture Image Saldo 
+[2023/02/08 15:17:08.000000] INFO [TokenProcess:2905] Upload Image Saldo Token:  11223344556677889900
+[2023/02/08 15:26:26.000000] INFO [GetKwhProcess:1881] Retrieve Mqtt Command 
+[2023/02/08 15:26:26.000000] INFO [GetKwhProcess:1888] Capture and Upload Photo 
+[2023/02/08 15:26:32.000000] INFO [GetKwhProcess:1881] Retrieve Mqtt Command 
+[2023/02/08 15:26:33.000000] INFO [GetKwhProcess:1888] Capture and Upload Photo 
+[2023/02/08 15:26:48.000000] INFO [GetKwhProcess:1881] Retrieve Mqtt Command 
+[2023/02/08 15:26:49.000000] INFO [GetKwhProcess:1888] Capture and Upload Photo 
+[2023/02/08 15:27:49.000000] INFO [GetKwhProcess:1881] Retrieve Mqtt Command 
+[2023/02/08 15:27:49.000000] INFO [GetKwhProcess:1888] Capture and Upload Photo 
+[2023/02/08 15:28:01.000000] INFO [GetKwhProcess:1881] Retrieve Mqtt Command 
+[2023/02/08 15:28:01.000000] INFO [GetKwhProcess:1888] Capture and Upload Photo 
+[2023/02/08 15:28:49.000000] INFO [GetKwhProcess:1881] Retrieve Mqtt Command 
+[2023/02/08 15:28:49.000000] INFO [GetKwhProcess:1888] Capture and Upload Photo 
+[2023/02/08 15:29:41.000000] INFO [GetKwhProcess:1881] Retrieve Mqtt Command 
+[2023/02/08 15:29:41.000000] INFO [GetKwhProcess:1888] Capture and Upload Photo 
+[2023/02/08 15:30:07.000000] INFO [TokenProcess:2583] Retrieve Topup Command 
+[2023/02/08 15:30:33.000000] INFO [TokenProcess:2719] Sound Validasi success
+[2023/02/08 15:30:34.000000] INFO [TokenProcess:2727] Capture Image Status 
+[2023/02/08 15:30:34.000000] INFO [TokenProcess:2737] Upload Image Status 
+[2023/02/08 15:30:44.000000] INFO [TokenProcess:2828] Capture Image Nominal 
+[2023/02/08 15:30:45.000000] INFO [TokenProcess:2838] Upload Image Nominal 
+[2023/02/08 15:30:46.000000] INFO [TokenProcess:2895] Capture Image Saldo 
+[2023/02/08 15:31:07.000000] INFO [TokenProcess:2905] Upload Image Saldo Token:  11223344556677889900
+[2023/02/08 15:32:12.000000] INFO [GetKwhProcess:1881] Retrieve Mqtt Command 
+[2023/02/08 15:32:12.000000] INFO [GetKwhProcess:1888] Capture and Upload Photo 
+[2023/02/08 15:34:38.000000] INFO [GetKwhProcess:1881] Retrieve Mqtt Command 
+[2023/02/08 15:34:38.000000] INFO [GetKwhProcess:1888] Capture and Upload Photo 
+[2023/02/08 15:35:01.000000] INFO [TokenProcess:2583] Retrieve Topup Command 
+[2023/02/08 15:35:28.000000] INFO [TokenProcess:2719] Sound Validasi failed
+[2023/02/08 15:35:28.000000] INFO [TokenProcess:2727] Capture Image Status 
+[2023/02/08 15:35:29.000000] INFO [TokenProcess:2737] Upload Image Status 
+[2023/02/08 15:35:39.000000] INFO [TokenProcess:2828] Capture Image Nominal 
+[2023/02/08 15:35:40.000000] INFO [TokenProcess:2838] Upload Image Nominal 
+[2023/02/08 15:35:41.000000] INFO [TokenProcess:2895] Capture Image Saldo 
+[2023/02/08 15:35:41.000000] INFO [TokenProcess:2905] Upload Image Saldo Token:  11223344556677889900
+[2023/02/08 15:43:23.000000] INFO [GetKwhProcess:1881] Retrieve Mqtt Command 
+[2023/02/08 15:43:23.000000] INFO [GetKwhProcess:1888] Capture and Upload Photo 
+[2023/02/08 15:43:55.000000] INFO [GetKwhProcess:1881] Retrieve Mqtt Command 
+[2023/02/08 15:43:55.000000] INFO [GetKwhProcess:1888] Capture and Upload Photo 
+[2023/02/08 15:44:39.000000] INFO [GetKwhProcess:1881] Retrieve Mqtt Command 
+[2023/02/08 15:44:40.000000] INFO [GetKwhProcess:1888] Capture and Upload Photo 
+[2023/02/08 15:44:49.000000] INFO [GetKwhProcess:1881] Retrieve Mqtt Command 
+[2023/02/08 15:44:49.000000] INFO [GetKwhProcess:1888] Capture and Upload Photo 
+[2023/02/08 15:45:04.000000] INFO [GetKwhProcess:1881] Retrieve Mqtt Command 
+[2023/02/08 15:45:04.000000] INFO [GetKwhProcess:1888] Capture and Upload Photo 
+[2023/02/08 15:45:16.000000] INFO [GetKwhProcess:1881] Retrieve Mqtt Command 
+[2023/02/08 15:45:17.000000] INFO [GetKwhProcess:1888] Capture and Upload Photo 
+[2023/02/08 15:46:08.000000] INFO [GetKwhProcess:1881] Retrieve Mqtt Command 
+[2023/02/08 15:46:08.000000] INFO [GetKwhProcess:1888] Capture and Upload Photo 
+[2023/02/08 15:46:16.000000] INFO [GetKwhProcess:1881] Retrieve Mqtt Command 
+[2023/02/08 15:46:17.000000] INFO [GetKwhProcess:1888] Capture and Upload Photo 
+[2023/02/08 15:46:23.000000] INFO [GetKwhProcess:1881] Retrieve Mqtt Command 
+[2023/02/08 15:46:24.000000] INFO [GetKwhProcess:1888] Capture and Upload Photo 
+[2023/02/08 15:46:30.000000] INFO [GetKwhProcess:1881] Retrieve Mqtt Command 
+[2023/02/08 15:46:30.000000] INFO [GetKwhProcess:1888] Capture and Upload Photo 
+[2023/02/08 15:46:40.000000] INFO [GetKwhProcess:1881] Retrieve Mqtt Command 
+[2023/02/08 15:46:40.000000] INFO [GetKwhProcess:1888] Capture and Upload Photo 
+[2023/02/08 15:47:01.000000] INFO [TokenProcess:2583] Retrieve Topup Command 
+[2023/02/08 15:47:28.000000] INFO [TokenProcess:2719] Sound Validasi success
+[2023/02/08 15:47:28.000000] INFO [TokenProcess:2727] Capture Image Status 
+[2023/02/08 15:47:29.000000] INFO [TokenProcess:2737] Upload Image Status 
+[2023/02/08 15:47:39.000000] INFO [TokenProcess:2828] Capture Image Nominal 
+[2023/02/08 15:47:40.000000] INFO [TokenProcess:2838] Upload Image Nominal 
+[2023/02/08 15:47:41.000000] INFO [TokenProcess:2895] Capture Image Saldo 
+[2023/02/08 15:48:02.000000] INFO [TokenProcess:2905] Upload Image Saldo Token:  11223344556677889900
+[2023/02/08 15:48:02.000000] INFO [GetKwhProcess:1881] Retrieve Mqtt Command 
+[2023/02/08 15:48:02.000000] INFO [GetKwhProcess:1888] Capture and Upload Photo 
+[2023/02/08 15:49:14.000000] INFO [GetKwhProcess:1881] Retrieve Mqtt Command 
+[2023/02/08 15:49:14.000000] INFO [GetKwhProcess:1888] Capture and Upload Photo 
+[2023/02/08 15:51:03.000000] INFO [TokenProcess:2583] Retrieve Topup Command 
+[2023/02/08 15:51:30.000000] INFO [TokenProcess:2719] Sound Validasi invalid
+[2023/02/08 15:51:30.000000] INFO [TokenProcess:2727] Capture Image Status 
+[2023/02/08 15:51:31.000000] INFO [TokenProcess:2737] Upload Image Status 
+[2023/02/08 15:51:41.000000] INFO [TokenProcess:2828] Capture Image Nominal 
+[2023/02/08 15:51:42.000000] INFO [TokenProcess:2838] Upload Image Nominal 
+[2023/02/08 15:51:43.000000] INFO [TokenProcess:2895] Capture Image Saldo 
+[2023/02/08 15:51:44.000000] INFO [TokenProcess:2905] Upload Image Saldo Token:  88888888888888888888
+[2023/02/08 15:52:18.000000] INFO [TokenProcess:2583] Retrieve Topup Command 
+[2023/02/08 15:52:44.000000] INFO [TokenProcess:2719] Sound Validasi failed
+[2023/02/08 15:52:45.000000] INFO [TokenProcess:2727] Capture Image Status 
+[2023/02/08 15:52:45.000000] INFO [TokenProcess:2737] Upload Image Status 
+[2023/02/08 15:52:55.000000] INFO [TokenProcess:2828] Capture Image Nominal 
+[2023/02/08 15:52:56.000000] INFO [TokenProcess:2838] Upload Image Nominal 
+[2023/02/08 15:52:57.000000] INFO [TokenProcess:2895] Capture Image Saldo 
+[2023/02/08 15:52:58.000000] INFO [TokenProcess:2905] Upload Image Saldo Token:  11223355446678899889
+[2023/02/08 15:53:25.000000] INFO [TokenProcess:2583] Retrieve Topup Command 
+[2023/02/08 15:53:52.000000] INFO [TokenProcess:2719] Sound Validasi failed
+[2023/02/08 15:53:52.000000] INFO [TokenProcess:2727] Capture Image Status 
+[2023/02/08 15:54:13.000000] INFO [TokenProcess:2737] Upload Image Status 
+[2023/02/08 15:54:13.000000] INFO [TokenProcess:2861] Capture Image Nominal 
+[2023/02/08 15:54:19.000000] INFO [TokenProcess:2871] Upload Image Nominal 
+[2023/02/08 15:54:20.000000] INFO [TokenProcess:2895] Capture Image Saldo 
+[2023/02/08 15:54:26.000000] INFO [TokenProcess:2905] Upload Image Saldo Token:  53535359898989898989
+[2023/02/08 16:02:35.000000] INFO [GetKwhProcess:1881] Retrieve Mqtt Command 
+[2023/02/08 16:02:35.000000] INFO [GetKwhProcess:1888] Capture and Upload Photo 
+[2023/02/08 16:02:46.000000] INFO [RequestKalibrasiSolenoids:3179] Receive Kalibrasi Command 
+[2023/02/08 16:02:50.000000] INFO [RequestKalibrasiSolenoids:3216] Capture Kalibrasi 1 
+[2023/02/08 16:02:51.000000] INFO [RequestKalibrasiSolenoids:3226] Upload Kalibrasi 1 
+[2023/02/08 16:02:56.000000] INFO [RequestKalibrasiSolenoids:3278] Capture Kalibrasi 2 
+[2023/02/08 16:02:56.000000] INFO [RequestKalibrasiSolenoids:3288] Upload Kalibrasi 2 
+[2023/02/08 16:12:26.000000] INFO [TokenProcess:2583] Retrieve Topup Command 
+[2023/02/08 16:12:53.000000] INFO [TokenProcess:2719] Sound Validasi failed
+[2023/02/08 16:12:53.000000] INFO [TokenProcess:2727] Capture Image Status 
+[2023/02/08 16:12:54.000000] INFO [TokenProcess:2737] Upload Image Status 
+[2023/02/08 16:13:04.000000] INFO [TokenProcess:2828] Capture Image Nominal 
+[2023/02/08 16:13:05.000000] INFO [TokenProcess:2838] Upload Image Nominal 
+[2023/02/08 16:13:06.000000] INFO [TokenProcess:2895] Capture Image Saldo 
+[2023/02/08 16:13:07.000000] INFO [TokenProcess:2905] Upload Image Saldo Token:  11223344556677889900
+[2023/02/08 16:16:22.000000] INFO [TokenProcess:2583] Retrieve Topup Command 
+[2023/02/08 16:16:49.000000] INFO [TokenProcess:2719] Sound Validasi failed
+[2023/02/08 16:16:49.000000] INFO [TokenProcess:2727] Capture Image Status 
+[2023/02/08 16:16:49.000000] INFO [TokenProcess:2737] Upload Image Status 
+[2023/02/08 16:17:00.000000] INFO [TokenProcess:2828] Capture Image Nominal 
+[2023/02/08 16:17:00.000000] INFO [TokenProcess:2838] Upload Image Nominal 
+[2023/02/08 16:17:02.000000] INFO [TokenProcess:2895] Capture Image Saldo 
+[2023/02/08 16:17:02.000000] INFO [TokenProcess:2905] Upload Image Saldo Token:  11223344556677889900
+[2023/02/08 16:17:27.000000] INFO [TokenProcess:2583] Retrieve Topup Command 
+[2023/02/08 16:17:54.000000] INFO [TokenProcess:2719] Sound Validasi failed
+[2023/02/08 16:17:54.000000] INFO [TokenProcess:2727] Capture Image Status 
+[2023/02/08 16:18:15.000000] INFO [TokenProcess:2737] Upload Image Status 
+[2023/02/08 16:18:15.000000] INFO [TokenProcess:2861] Capture Image Nominal 
+[2023/02/08 16:18:21.000000] INFO [TokenProcess:2871] Upload Image Nominal 
+[2023/02/08 16:18:22.000000] INFO [TokenProcess:2895] Capture Image Saldo 
+[2023/02/08 16:18:28.000000] INFO [TokenProcess:2905] Upload Image Saldo Token:  69696969696969696969
+[2023/02/08 16:20:20.000000] INFO [DetectionLowToken:1763] Notif Low Saldo 
+[2023/02/08 16:22:26.000000] INFO [TokenProcess:2583] Retrieve Topup Command 
+[2023/02/08 16:22:52.000000] INFO [TokenProcess:2719] Sound Validasi failed
+[2023/02/08 16:22:53.000000] INFO [TokenProcess:2727] Capture Image Status 
+[2023/02/08 16:22:53.000000] INFO [TokenProcess:2737] Upload Image Status 
+[2023/02/08 16:23:03.000000] INFO [TokenProcess:2828] Capture Image Nominal 
+[2023/02/08 16:23:04.000000] INFO [TokenProcess:2838] Upload Image Nominal 
+[2023/02/08 16:23:06.000000] INFO [TokenProcess:2895] Capture Image Saldo 
+[2023/02/08 16:23:06.000000] INFO [TokenProcess:2905] Upload Image Saldo Token:  11223344556677889900

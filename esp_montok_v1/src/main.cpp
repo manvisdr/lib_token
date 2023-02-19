@@ -5,9 +5,6 @@
 #include <Wire.h>
 #include <PubSubClient.h>
 #include "esp_camera.h"
-#include <BluetoothSerial.h>
-#include "esp_bt_main.h"
-#include "esp_bt_device.h"
 #include <Adafruit_MCP23017.h>
 #include <driver/i2s.h>
 #include <math.h>
@@ -35,7 +32,6 @@
 #include <SettingsManager.h>
 
 ESPSL sysLog;
-BluetoothSerial SerialBT;
 WiFiClient client;
 PubSubClient mqtt(client);
 Adafruit_MCP23017 mcp;
@@ -1765,7 +1761,7 @@ void setup()
 {
   Serial.begin(115200);
   SettingsInit();
-  BluetoothInit();
+  
   WiFiInit();
   CameraInit();
   // SoundInit();

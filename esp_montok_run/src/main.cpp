@@ -62,6 +62,7 @@ Task wifi_watchdog_task(WIFI_WATCHDOG_INTERVAL, TASK_FOREVER, &wifi_watchdog_cb)
 // Task runner
 Scheduler wifiReconRunner;
 Preferences EepromStatus;
+bool signalFlag;
 
 AlarmId pingTime;
 AlarmId pingTimeSend;
@@ -146,7 +147,7 @@ int freqPeak = 117;
 // #define USE_LOG
 #define TIMEOUT_SUARA 600
 
-const int delaySolenoid = 200;
+const int delaySolenoid = 1000;
 const int delaySolenoidCalib = 500;
 long validasiStartTimer;
 long afterSolenoid;
@@ -205,6 +206,11 @@ char bluetooth_name[sizeof(productName) + sizeof(idDevice)];
 const char *mqttChannel = "TokenOnline";
 const char *MqttUser = "das";
 const char *MqttPass = "mgi2022";
+
+char topicTESTSuara[50];
+bool bolTestSuara;
+long testSuaraMillis;
+bool finishTestSuara;
 
 char topicREQToken[50];
 char topicREQAlarm[50];
@@ -275,7 +281,7 @@ static unsigned long lastTrigger[2] = {0, 0};
 float loudness;
 int soundValidasiCnt;
 int soundValidasiCnts;
-
+int timeoutUpload = 10000;
 boolean detectShort = false;
 boolean detectLong = false;
 int detectLongCnt;
@@ -283,12 +289,29 @@ int detectShortCnt;
 int cntDetected;
 int cntLoss;
 
+bool bolprevAlarmSound;
+bool bolnowAlarmSound;
+bool bolnexAlarmSound;
+int prevValidSound;
+int nowValidSound;
+bool bolprevValidSound;
+bool bolnowValidSound;
+bool bolnexValidSound;
+bool outValidSound;
+int counterValidasiSound;
+int beginCnt;
+int lastCnt;
+int counterBeep;
+int valueInterval;
+
 unsigned int SoundPeak;
 // VARIABLE SOUND DETECTION
 
 bool prevAlarmStatus = false;
 bool AlarmStatus = false;
 bool timeAlarm = false;
+
+int counterAlarm;
 
 int cnt = 0;
 
@@ -345,10 +368,6 @@ int timeEnableAlarm = 60;
 void MqttCustomPublish(char *path, String msg);
 void MqttPublishStatus(String msg);
 void WifiInit();
-
-camera_fb_t *cap_status = NULL;
-camera_fb_t *cap_nominal = NULL;
-camera_fb_t *cap_saldo = NULL;
 
 char *my_itoa(char *dest, int i)
 {
@@ -733,7 +752,10 @@ void CheckPingBackground(void *parameter)
 void dummySignalSend()
 {
 
-  MqttCustomPublish(topicRSPSignal, "3");
+  if (signalFlag)
+    MqttCustomPublish(topicRSPSignal, "3");
+  else
+    MqttCustomPublish(topicRSPSignal, "2");
   // counterPing = 0;
 }
 
@@ -869,12 +891,12 @@ void WifiInit()
 {
   Serial.println("**WIFI INIT START**");
   wifi_connect_cb();
-  wifiReconRunner.init();
-  wifiReconRunner.addTask(wifi_connect_task);
-  wifiReconRunner.addTask(wifi_watchdog_task);
+  // wifiReconRunner.init();
+  // wifiReconRunner.addTask(wifi_connect_task);
+  // wifiReconRunner.addTask(wifi_watchdog_task);
   WiFi.mode(wifi_mode_t::WIFI_STA);
   WiFi.onEvent(_wifi_event);
-  wifi_connect_task.enableDelayed(5000);
+  // wifi_connect_task.enableDelayed(5000);
   Serial.println("**WIFI INIT COMPLETE**");
 
   // #ifdef USEOTA
@@ -1025,7 +1047,7 @@ String sendNotifSaldo(char *sn)
     return ("connection failed");
   }
 
-  MqttPublishStatus("SENDING NOTIF SALDO");
+  // MqttPublishStatus("SENDING NOTIF SALDO");
   Serial.println("SENDING NOTIF SALDO");
 
   postClient.print(headerTxt);
@@ -1227,6 +1249,7 @@ void CameraInit()
   if (err != ESP_OK)
   {
     Serial.printf("Camera init failed with error 0x%x", err);
+    ESP.restart();
     return;
   }
   else
@@ -1482,6 +1505,7 @@ void MqttPublishResponse(String msg)
 void MqttTopicInit()
 {
   // sprintf(topicREQToken, "%s/%s/%s/%s", mqttChannel, "request", idDevice, "token");
+  sprintf(topicTESTSuara, "%s/%s/%s", "testSuaraValidasi", "request", idDevice);
 
   sprintf(topicRSPSignal, "%s/%s/%s/%s", mqttChannel, "respond", idDevice, "signal");
   sprintf(topicRSPStatus, "%s/%s/%s/%s", mqttChannel, "respond", idDevice, "debug");
@@ -1530,8 +1554,9 @@ void MqttReconnect()
     if (mqtt.connect(clientId.c_str()))
     {
       Serial.println("connected");
-      MqttPublishStatus("CONNECTED MQTT");
+      // MqttPublishStatus("CONNECTED MQTT");
       dummySignalSend();
+      mqtt.subscribe(topicTESTSuara);
       mqtt.subscribe(topicREQAlarm);
       mqtt.subscribe(topicREQtimeStatus);
       mqtt.subscribe(topicREQtimeNomi);
@@ -1693,6 +1718,77 @@ bool DetectionLowToken()
   return false;
 }
 
+int DetectLowTokenV2()
+{
+  SoundLooping();
+  bolprevAlarmSound = bolnowAlarmSound;
+  bolnowAlarmSound = bolnexAlarmSound;
+  bolnexAlarmSound = SoundPeak == kwhfreqbuff || (SoundPeak == kwhfreqbuff + 1 || SoundPeak == kwhfreqbuff - 1);
+  if (bolprevAlarmSound < bolnowAlarmSound and bolnowAlarmSound > bolnexAlarmSound)
+  {
+    timer.start(6000);
+    prevAlarmStatus = true;
+    counterAlarm++;
+  }
+  //  if (bolnowVal > bolnexVal)
+  // {
+  //   counterAlarm++;
+  // }
+  // else
+  //   return counterAlarm = 0;
+  else if (timer.time_over())
+  {
+    counterAlarm = 0;
+    AlarmStatus = false;
+    prevAlarmStatus = false;
+    // timeAlarm = false;
+  }
+
+  if (counterAlarm > 30)
+  {
+    AlarmStatus = true;
+
+    // MqttCustomPublish(topicRSPSoundAlarm, String(counter));
+    // counter = 0;
+    // prevAlarmStatus = false;
+    // timeAlarm = false;
+  }
+
+  if (TimeKwhAlarm.time_over())
+  {
+    Serial.println("COUNTDOWN TIME OVER");
+    if (counterAlarm == 0)
+    {
+      Serial.println("COUNTDOWN START , COUNTER 0");
+      TimeKwhAlarm.start(kwhalarmbuff);
+    }
+    else if (counterAlarm > 12)
+    {
+      Serial.println("COUNTDOWN TIME OVER, TIME ALARM TRUE");
+      timeAlarm = true;
+    }
+  }
+
+  if (AlarmStatus and timeAlarm)
+  {
+    CaptureAndSendNotif();
+#ifdef USE_LOG
+    logFile_i("Notif Low Saldo", "", __FUNCTION__, __LINE__);
+    logNew("Send Notif Low Saldo", __FUNCTION__, __LINE__, "", "");
+#endif
+    //
+    Serial.println("SEND NOTIFICATION");
+
+    counterAlarm = 0;
+    AlarmStatus = false;
+    prevAlarmStatus = false;
+    timeAlarm = false;
+    TimeKwhAlarm.start(kwhalarmbuff);
+  }
+
+  return false;
+}
+
 int SoundDetectValidasi()
 {
   int validasiCnt;
@@ -1717,6 +1813,39 @@ int SoundDetectValidasi()
 
   // Serial.println("Timeout");
   return soundValidasiCnt;
+}
+
+void SoundDetectValidasiV2()
+{
+  SoundLooping();
+
+  bolprevValidSound = bolnowValidSound;
+  bolnowValidSound = bolnexValidSound;
+  bolnexValidSound = SoundPeak == kwhfreqbuff || (SoundPeak == kwhfreqbuff + 1 || SoundPeak == kwhfreqbuff - 1);
+
+  if ((bolprevValidSound < bolnowValidSound))
+  {
+    beginCnt = counterValidasiSound;
+  }
+
+  else if (bolnowValidSound > bolnexValidSound)
+  {
+    lastCnt = counterValidasiSound;
+    counterBeep++;
+    valueInterval += lastCnt - beginCnt;
+  }
+  else
+    counterValidasiSound++;
+
+  Serial.print(SoundPeak);
+  Serial.print(" ");
+  Serial.print(beginCnt);
+  Serial.print(" ");
+  Serial.print(lastCnt);
+  Serial.print(" ");
+  Serial.print(valueInterval);
+  Serial.print(" ");
+  Serial.println(counterBeep);
 }
 
 String OutputSoundValidasi(int val)
@@ -1754,6 +1883,52 @@ String OutputSoundValidasi(int val)
   return out;
 }
 
+String OutputSoundValidasiV2()
+{
+  String out;
+  if (kwhstatusbeepbuff == 1)
+  {
+    if (valueInterval != 0 and valueInterval <= 14 and counterBeep <= 4)
+    {
+      Serial.println("DETECK BENAR");
+      // MqttCustomPublish(topicRSPSoundStatus, "VALIDASI SUARA BENAR");
+      out = "success";
+    }
+    else if (valueInterval > 15 and counterBeep >= 2)
+    {
+      Serial.println("DETECK GAGAL");
+      // MqttCustomPublish(topicRSPSoundStatus, "VALIDASI SUARA GAGAL");
+      out = "failed";
+    }
+    else if (valueInterval == 0 and counterBeep == 0)
+    {
+      Serial.println("DETECK INVALID");
+      // MqttCustomPublish(topicRSPSoundStatus, "VALIDASI SUARA INVALID");
+      out = "invalid";
+    }
+    else
+    {
+      Serial.println("DETECK INVALID");
+      // MqttCustomPublish(topicRSPSoundStatus, "VALIDASI SUARA INVALID");
+      out = "invalid";
+    }
+  }
+  else
+  {
+    Serial.println("DETECK INVALID");
+    // MqttCustomPublish(topicRSPSoundStatus, "VALIDASI SUARA INVALID");
+    out = "invalid";
+  }
+  Serial.printf("Value Beep:%d Beep Pattern:%d \n", valueInterval, counterBeep);
+  lastCnt = 0;
+  beginCnt = 0;
+  counterBeep = 0;
+  valueInterval = 0;
+  counterValidasiSound = 0;
+  Serial.println("END VALIDASI SUARA");
+  return out;
+}
+
 void GetKwhProcess()
 {
   if (received_msg and strcmp(received_topic, topicREQView) == 0 /*and strcmp(received_payload, "view") == 0*/)
@@ -1763,7 +1938,7 @@ void GetKwhProcess()
     logFile_i("Retrieve Mqtt Command", "", __FUNCTION__, __LINE__);
 #endif
     MqttPublishResponse("view");
-    MqttPublishStatus("REQUESTING BALANCE");
+    // MqttPublishStatus("REQUESTING BALANCE");
     Serial.println("GET_KWH");
 #ifdef USE_SOLENOID
     MechanicBackSpace();
@@ -2024,9 +2199,9 @@ String sendImageNominal(char *filename, char *token)
   // nominalFile.close();
   // fileSys.end();
   // webClient.write(imageData, len);
-
+  bool flagTimeout;
   Serial.println("Uploading Nominal...");
-  postClient.setTimeout(10);
+  postClient.setTimeout(30);
   if (postClient.connect(SERVER.c_str(), PORT))
   {
     Serial.println("...Connected Server");
@@ -2034,29 +2209,30 @@ String sendImageNominal(char *filename, char *token)
 
     const size_t bufferSize = 256;
     uint8_t buffer[bufferSize];
-    long timenow = millis() + 10000;
-    Serial.println(timenow);
+    long timenow = millis() + timeoutUpload;
+    Serial.printf("timenow = %d\n", timenow);
+
     while (nominalFile.available() /*and !millis() > timenow*/)
     {
       size_t n = nominalFile.readBytes((char *)buffer, bufferSize);
-      // Serial.println(n);
+      // Serial.println(millis());
       if (millis() > timenow)
+      {
+        flagTimeout = true;
         break;
+      }
       if (n != 0)
       {
         postClient.write(buffer, n);
         postClient.flush();
-        // Serial.println(millis());
       }
-      // if (millis() == timenow)
-      //       break;
       else
       {
         Serial.println(F("Buffer was empty"));
-        break;
       }
     }
-
+    if (flagTimeout)
+      Serial.println("Timeout....");
     postClient.print("\r\n" + bodyEnd);
     nominalFile.close();
     fileSys.end();
@@ -2082,11 +2258,20 @@ String sendImageNominal(char *filename, char *token)
     // return String("UPLOADED");
   }
   else
-  {
-    Serial.println("connection failed!]");
-    postClient.stop();
-    return ("connection failed!");
-  }
+    return "failed";
+  // {
+  //   if (postClient.connect(SERVER.c_str(), PORT))
+  //   {
+  //     Serial.println("...Connected Server");
+  //     postClient.print(headerTxt + bodyNominal);
+  //     while (nominalFile.available())
+  //       postClient.write(nominalFile.read());
+  //     postClient.print("\r\n" + bodyEnd);
+  //     nominalFile.close();
+  //   }
+  //   return String("ELSE UPLOADED");
+  //   postClient.stop();
+  // }
 }
 
 String sendImageSaldo(char *token, uint8_t *data_pic, size_t size_pic)
@@ -2157,13 +2342,13 @@ String sendImageSaldo(char *filename, char *token)
   fileSys.begin();
   saldoFile = fileSys.open(filename); // change to your file name
   size_t filesize = saldoFile.size();
-
+  bool flagTimeout;
   String bodySaldo = body_Saldo();
   String bodyEnd = String("--") + BOUNDARY + String("--\r\n");
   size_t allLen = bodySaldo.length() + filesize + bodyEnd.length();
   String headerTxt = headerSaldo(token, allLen);
   Serial.println("Upload Saldo...");
-  postClient.setTimeout(10);
+  postClient.setTimeout(30);
   if (postClient.connect(SERVER.c_str(), PORT))
   {
     Serial.println("...Connected Server");
@@ -2172,29 +2357,32 @@ String sendImageSaldo(char *filename, char *token)
     //   postClient.write(saldoFile.read());
     const size_t bufferSize = 256;
     uint8_t buffer[bufferSize];
-    long timenow = millis() + 10000;
+    long timenow = millis() + timeoutUpload;
     Serial.println(timenow);
     while (saldoFile.available() /*and !millis() > timenow*/)
     {
       size_t n = saldoFile.readBytes((char *)buffer, bufferSize);
       // Serial.println(n);
       if (millis() > timenow)
+      {
+        flagTimeout = true;
         break;
+      }
       if (n != 0)
       {
         postClient.write(buffer, n);
         postClient.flush();
         // Serial.println(millis());
       }
-      // if (millis() == timenow)
-      //       break;
+
       else
       {
         Serial.println(F("Buffer was empty"));
         break;
       }
     }
-
+    if (flagTimeout)
+      Serial.println("Timeout..");
     postClient.print("\r\n" + bodyEnd);
     saldoFile.close();
     fileSys.end();
@@ -2222,11 +2410,19 @@ String sendImageSaldo(char *filename, char *token)
     // return String("UPLOADED");
   }
   else
-  {
-    Serial.println("connection failed!]");
-    postClient.stop();
-    return ("connection failed!");
-  }
+    return "failed";
+  //   if (postClient.connect(SERVER.c_str(), PORT))
+  //   {
+  //     postClient.print(headerTxt + bodySaldo);
+  //     while (saldoFile.available())
+  //       postClient.write(saldoFile.read());
+
+  //     postClient.print("\r\n" + bodyEnd);
+  //     saldoFile.close();
+  //   }
+  //   return String("ELSE UPLOADED");
+  //   postClient.stop();
+  // }
 }
 
 String sendImageStatusToken(String status, char *sn, char *token, uint8_t *data_pic, size_t size_pic)
@@ -2296,29 +2492,31 @@ String sendImageStatusToken(char *filename, String status, char *token, char *sn
   fileSys.begin();
   statusFile = fileSys.open(filename); // change to your file name
   size_t filesize = statusFile.size();
-
+  bool flagTimeout;
   String bodySatus = body_StatusToken();
   String bodyEnd = String("--") + BOUNDARY + String("--\r\n");
   size_t allLen = bodySatus.length() + filesize + bodyEnd.length();
   String headerTxt = headerStatusToken(status, token, sn, allLen);
   Serial.println("Upload Status...");
-  postClient.setTimeout(10);
+  postClient.setTimeout(30);
   if (postClient.connect(SERVER.c_str(), PORT))
   {
     Serial.println("...Connected Server");
     postClient.print(headerTxt + bodySatus);
-    Serial.println(headerTxt + bodySatus);
 
     const size_t bufferSize = 256;
     uint8_t buffer[bufferSize];
-    long timenow = millis() + 10000;
+    long timenow = millis() + timeoutUpload;
     Serial.println(timenow);
     while (statusFile.available() /*and !millis() > timenow*/)
     {
       size_t n = statusFile.readBytes((char *)buffer, bufferSize);
       // Serial.println(n);
       if (millis() > timenow)
+      {
+        flagTimeout = true;
         break;
+      }
       if (n != 0)
       {
         postClient.write(buffer, n);
@@ -2326,6 +2524,8 @@ String sendImageStatusToken(char *filename, String status, char *token, char *sn
 
         // Serial.println(millis());
       }
+      // if (!postClient.connect(SERVER.c_str(), PORT))
+      //       return "failed";
       else
       {
         Serial.println(F("Buffer was empty"));
@@ -2336,6 +2536,8 @@ String sendImageStatusToken(char *filename, String status, char *token, char *sn
     // {
     //   postClient.write(statusFile.read());
     // }
+    if (flagTimeout)
+      Serial.println("Timeout..");
     postClient.print("\r\n" + bodyEnd);
     statusFile.close();
     fileSys.end();
@@ -2356,11 +2558,7 @@ String sendImageStatusToken(char *filename, String status, char *token, char *sn
     // return String("UPLOADED");
   }
   else
-  {
-    Serial.println("connection failed!]");
-    postClient.stop();
-    return ("connection failed!");
-  }
+    return "failed";
 }
 
 bool CaptureToSpiffs(String path, uint8_t *data_pic, size_t size_pic)
@@ -2370,7 +2568,6 @@ bool CaptureToSpiffs(String path, uint8_t *data_pic, size_t size_pic)
   {
     Serial.println("SD Card Mount Failed");
     state = false;
-    return state;
   }
 
   Serial.printf("Picture file name: %s\n", path.c_str());
@@ -2532,31 +2729,57 @@ void RespondParameter()
 
 bool UploadBuktiTokenProcessv2()
 {
-  yield();
   if (sendImageNominal(nominalFileSpiffs, received_payload) == "HTTP/1.1 200 OK")
   {
     Serial.println("Upload Nominal Sucess");
     flagUploadNominal = true;
   }
   else
+  {
+    Serial.println("--Upload Nominal Failed--");
     flagUploadNominal = false;
+  }
+
   yield();
-  if (sendImageSaldo(saldoFileSpiffs, received_payload) == "HTTP/1.1 200 OK")
+  if (flagUploadNominal)
   {
-    Serial.println("Upload Saldo Sucess");
-    flagUploadSaldo = true;
+    if (sendImageSaldo(saldoFileSpiffs, received_payload) == "HTTP/1.1 200 OK")
+    {
+      Serial.println("Upload Saldo Sucess");
+      flagUploadSaldo = true;
+    }
+    else
+    {
+      Serial.println("--Upload Saldo Failed--");
+      flagUploadSaldo = false;
+    }
   }
   else
+  {
+    Serial.println("--Upload Saldo Failed--");
     flagUploadSaldo = false;
+  }
+
   yield();
-  if (sendImageStatusToken(statusFileSpiffs, StrSoundValidasi, idDevice, received_payload) == "HTTP/1.1 200 OK")
+  if (flagUploadSaldo)
   {
-    Serial.println("Upload Status Sucess");
-    flagUploadStatus = true;
+    if (sendImageStatusToken(statusFileSpiffs, StrSoundValidasi, received_payload, idDevice) == "HTTP/1.1 200 OK")
+    {
+      Serial.println("Upload Status Sucess");
+      flagUploadStatus = true;
+    }
+    else
+    {
+      Serial.println("--Upload Status Failed--");
+      flagUploadStatus = false;
+    }
   }
   else
-    flagUploadStatus = false;
-  yield();
+  {
+    Serial.println("--Upload Status Failed--");
+    flagUploadSaldo = false;
+  }
+
   if (flagUploadSaldo and flagUploadNominal and flagUploadStatus)
     return true;
   else
@@ -2595,6 +2818,39 @@ bool UploadBuktiTokenProcess()
     return false;
 }
 
+void TestSuara()
+{
+  if (received_msg and (strcmp(received_topic, topicTESTSuara) == 0) and status == Status::IDLE)
+  {
+    status = Status::PROCCESS_TOKEN;
+    Serial.println("testSound");
+    MechanicTyping(3);
+    delay(delaySolenoid / 2);
+    MechanicTyping(4);
+    delay(delaySolenoid / 2);
+    MechanicTyping(5);
+    delay(delaySolenoid / 2);
+    MechanicTyping(0);
+    delay(delaySolenoid / 2);
+    MechanicTyping(10);
+    delay(delaySolenoid / 2);
+    MechanicEnter();
+    delay(100);
+    testSuaraMillis = millis() + timeoutUpload / 2;
+    bolTestSuara = true;
+  }
+  if (status == Status::PROCCESS_TOKEN and millis() < testSuaraMillis and bolTestSuara)
+  {
+    SoundDetectValidasiV2();
+  }
+  if (status == Status::PROCCESS_TOKEN and millis() > testSuaraMillis)
+  {
+    Serial.println(OutputSoundValidasiV2());
+    bolTestSuara = false;
+    status = Status::IDLE;
+    received_msg = false;
+  }
+}
 void TokenProcess(/*char *token*/)
 {
   if (received_msg and (strcmp(received_topic, topicREQToken) == 0) and received_length == 20 and status == Status::IDLE)
@@ -2612,7 +2868,7 @@ void TokenProcess(/*char *token*/)
       switch (chars)
       {
       case '0':
-        MqttPublishStatus("SELENOID " + String(chars) + " ON");
+        // MqttPublishStatus("SELENOID " + String(chars) + " ON");
 #ifdef USE_SOLENOID
         MechanicTyping(10);
 #endif
@@ -2620,7 +2876,7 @@ void TokenProcess(/*char *token*/)
         break;
 
       case '1':
-        MqttPublishStatus("SELENOID " + String(chars) + " ON");
+        // MqttPublishStatus("SELENOID " + String(chars) + " ON");
 #ifdef USE_SOLENOID
         MechanicTyping(0);
 #endif
@@ -2628,56 +2884,56 @@ void TokenProcess(/*char *token*/)
         break;
 
       case '2':
-        MqttPublishStatus("SELENOID " + String(chars) + " ON");
+        // MqttPublishStatus("SELENOID " + String(chars) + " ON");
 #ifdef USE_SOLENOID
         MechanicTyping(1);
 #endif
         delay(delaySolenoid);
         break;
       case '3':
-        MqttPublishStatus("SELENOID " + String(chars) + " ON");
+        // MqttPublishStatus("SELENOID " + String(chars) + " ON");
 #ifdef USE_SOLENOID
         MechanicTyping(2);
 #endif
         delay(delaySolenoid);
         break;
       case '4':
-        MqttPublishStatus("SELENOID " + String(chars) + " ON");
+        // MqttPublishStatus("SELENOID " + String(chars) + " ON");
 #ifdef USE_SOLENOID
         MechanicTyping(3);
 #endif
         delay(delaySolenoid);
         break;
       case '5':
-        MqttPublishStatus("SELENOID " + String(chars) + " ON");
+        // MqttPublishStatus("SELENOID " + String(chars) + " ON");
 #ifdef USE_SOLENOID
         MechanicTyping(4);
 #endif
         delay(delaySolenoid);
         break;
       case '6':
-        MqttPublishStatus("SELENOID " + String(chars) + " ON");
+        // MqttPublishStatus("SELENOID " + String(chars) + " ON");
 #ifdef USE_SOLENOID
         MechanicTyping(5);
 #endif
         delay(delaySolenoid);
         break;
       case '7':
-        MqttPublishStatus("SELENOID " + String(chars) + " ON");
+        // MqttPublishStatus("SELENOID " + String(chars) + " ON");
 #ifdef USE_SOLENOID
         MechanicTyping(6);
 #endif
         delay(delaySolenoid);
         break;
       case '8':
-        MqttPublishStatus("SELENOID " + String(chars) + " ON");
+        // MqttPublishStatus("SELENOID " + String(chars) + " ON");
 #ifdef USE_SOLENOID
         MechanicTyping(7);
 #endif
         delay(delaySolenoid);
         break;
       case '9':
-        MqttPublishStatus("SELENOID " + String(chars) + " ON");
+        // MqttPublishStatus("SELENOID " + String(chars) + " ON");
 #ifdef USE_SOLENOID
         MechanicTyping(8);
 #endif
@@ -2691,7 +2947,7 @@ void TokenProcess(/*char *token*/)
     MechanicEnter();
 #endif
     delay(delaySolenoid);
-    MqttPublishStatus("SELENOID ENTER ON");
+    // MqttPublishStatus("SELENOID ENTER ON");
     Serial.println("ENTER");
     // delay(delayStatus);
     // validasiStartTimer = millis();
@@ -2706,7 +2962,6 @@ void TokenProcess(/*char *token*/)
   if (status == Status::PROCCESS_TOKEN and millis() < afterSolenoid + kwhtimestatbuff)
   {
     camera_fb_t *fbs;
-    Serial.printf("millis() =%d RecordValidasiSound()\n", millis());
 
     // if (kwhstatusbeepbuff == 1)
     // {
@@ -2733,12 +2988,12 @@ void TokenProcess(/*char *token*/)
     // }
 
     if (kwhstatusbeepbuff = 1)
-      soundValidasiCnts = SoundDetectValidasi();
+      SoundDetectValidasiV2();
     if (millis() > afterSolenoid + ((kwhtimestatbuff / 2) + 100) and
         millis() < afterSolenoid + kwhtimestatbuff and TokenStateStatus)
     {
       // digitalWrite(4, HIGH);
-      StrSoundValidasi = OutputSoundValidasi(soundValidasiCnts);
+      Serial.printf("millis() =%d RecordValidasiSound()\n", millis());
 #ifdef USE_LOG
       logFile_i("Sound Validasi", (char *)outputvalid.c_str(), __FUNCTION__, __LINE__);
 #endif
@@ -2759,7 +3014,7 @@ void TokenProcess(/*char *token*/)
       }
       else
       {
-        // res = sendImageStatusToken(StrSoundValidasi, idDevice, received_payload, cap_status->buf, cap_status->len);
+        // res = sendImageStatusToken(StrSoundValidasi, idDevice, received_payload, fbs->buf, fbs->len);
         CaptureStatus = CaptureToSpiffs(statusFileSpiffs, fbs->buf, fbs->len);
 #ifdef USE_LOG
         logFile_i("Upload Image Status", "", __FUNCTION__, __LINE__);
@@ -2895,7 +3150,7 @@ void TokenProcess(/*char *token*/)
 #ifdef USE_LOG
       logFile_i("Capture Image Nominal", "", __FUNCTION__, __LINE__);
 #endif
-      if (!cap_saldo)
+      if (!fb)
       {
         Serial.println("Camera capture failed");
         delay(1000);
@@ -2909,7 +3164,7 @@ void TokenProcess(/*char *token*/)
         logFile_i("Upload Image Nominal", "", __FUNCTION__, __LINE__);
 #endif
         // Serial.println(res);
-        // esp_camera_fb_return(cap_saldo);
+        esp_camera_fb_return(fb);
       }
       TokenStateNominal = false;
       TokenStateSaldo = true;
@@ -2961,6 +3216,8 @@ void TokenProcess(/*char *token*/)
     TokenStateSaldo = false;
     received_msg = false;
     newToken = true;
+    StrSoundValidasi = OutputSoundValidasiV2();
+    Serial.println(StrSoundValidasi);
     status = Status::IDLE;
   }
 
@@ -3107,7 +3364,7 @@ void RequestKalibrasiSolenoid()
       switch (chars)
       {
       case '0':
-        MqttPublishStatus("SELENOID " + String(chars) + " ON");
+        // MqttPublishStatus("SELENOID " + String(chars) + " ON");
 #ifdef USE_SOLENOID
         MechanicTyping(10);
 #endif
@@ -3115,7 +3372,7 @@ void RequestKalibrasiSolenoid()
         break;
 
       case '1':
-        MqttPublishStatus("KALIBRASI SELENOID " + String(chars) + " ON");
+        // MqttPublishStatus("KALIBRASI SELENOID " + String(chars) + " ON");
 #ifdef USE_SOLENOID
         MechanicTyping(0);
 #endif
@@ -3123,69 +3380,69 @@ void RequestKalibrasiSolenoid()
         break;
 
       case '2':
-        MqttPublishStatus("KALIBRASI SELENOID " + String(chars) + " ON");
+        // MqttPublishStatus("KALIBRASI SELENOID " + String(chars) + " ON");
 #ifdef USE_SOLENOID
         MechanicTyping(1);
 #endif
         delay(delaySolenoid);
         break;
       case '3':
-        MqttPublishStatus("KALIBRASI SELENOID " + String(chars) + " ON");
+        // MqttPublishStatus("KALIBRASI SELENOID " + String(chars) + " ON");
 #ifdef USE_SOLENOID
         MechanicTyping(2);
 #endif
         delay(delaySolenoid);
         break;
       case '4':
-        MqttPublishStatus("KALIBRASI SELENOID " + String(chars) + " ON");
+        // MqttPublishStatus("KALIBRASI SELENOID " + String(chars) + " ON");
 #ifdef USE_SOLENOID
         MechanicTyping(3);
 #endif
         delay(delaySolenoid);
         break;
       case '5':
-        MqttPublishStatus("KALIBRASI SELENOID " + String(chars) + " ON");
+        // MqttPublishStatus("KALIBRASI SELENOID " + String(chars) + " ON");
 #ifdef USE_SOLENOID
         MechanicTyping(4);
 #endif
         delay(delaySolenoid);
         break;
       case '6':
-        MqttPublishStatus("KALIBRASI SELENOID " + String(chars) + " ON");
+        // MqttPublishStatus("KALIBRASI SELENOID " + String(chars) + " ON");
 #ifdef USE_SOLENOID
         MechanicTyping(5);
 #endif
         delay(delaySolenoid);
         break;
       case '7':
-        MqttPublishStatus("KALIBRASI SELENOID " + String(chars) + " ON");
+        // MqttPublishStatus("KALIBRASI SELENOID " + String(chars) + " ON");
 #ifdef USE_SOLENOID
         MechanicTyping(6);
 #endif
         delay(delaySolenoid);
         break;
       case '8':
-        MqttPublishStatus("KALIBRASI SELENOID " + String(chars) + " ON");
+        // MqttPublishStatus("KALIBRASI SELENOID " + String(chars) + " ON");
 #ifdef USE_SOLENOID
         MechanicTyping(7);
 #endif
         delay(delaySolenoid);
         break;
       case '9':
-        MqttPublishStatus("KALIBRASI SELENOID " + String(chars) + " ON");
+        // MqttPublishStatus("KALIBRASI SELENOID " + String(chars) + " ON");
 #ifdef USE_SOLENOID
         MechanicTyping(8);
 #endif
         delay(delaySolenoid);
       case 'B':
-        MqttPublishStatus("KALIBRASI SELENOID BACKSPACE ON");
+        // MqttPublishStatus("KALIBRASI SELENOID BACKSPACE ON");
 #ifdef USE_SOLENOID
         MechanicBackSpace();
 #endif
         delay(delaySolenoid);
         break;
       case 'E':
-        MqttPublishStatus("KALIBRASI SELENOID ENTER ON");
+        // MqttPublishStatus("KALIBRASI SELENOID ENTER ON");
 #ifdef USE_SOLENOID
         MechanicEnter();
 #endif
@@ -3227,31 +3484,31 @@ void RequestKalibrasiSolenoids()
 #ifdef USE_LOG
     logFile_i("Receive Kalibrasi Command", "", __FUNCTION__, __LINE__);
 #endif
-    MqttPublishStatus("KALIBRASI SELENOID 1 ON");
+    // MqttPublishStatus("KALIBRASI SELENOID 1 ON");
 #ifdef USE_SOLENOID
     MechanicTyping(0);
 #endif
     delay(delaySolenoidCalib);
 
-    MqttPublishStatus("KALIBRASI SELENOID 2 ON");
+    // MqttPublishStatus("KALIBRASI SELENOID 2 ON");
 #ifdef USE_SOLENOID
     MechanicTyping(1);
 #endif
     delay(delaySolenoidCalib);
 
-    MqttPublishStatus("KALIBRASI SELENOID 3 ON");
+    // MqttPublishStatus("KALIBRASI SELENOID 3 ON");
 #ifdef USE_SOLENOID
     MechanicTyping(2);
 #endif
     delay(delaySolenoidCalib);
 
-    MqttPublishStatus("KALIBRASI SELENOID 4 ON");
+    // MqttPublishStatus("KALIBRASI SELENOID 4 ON");
 #ifdef USE_SOLENOID
     MechanicTyping(3);
 #endif
     delay(delaySolenoidCalib);
 
-    MqttPublishStatus("KALIBRASI SELENOID 5 ON");
+    // MqttPublishStatus("KALIBRASI SELENOID 5 ON");
 #ifdef USE_SOLENOID
     MechanicTyping(4);
 #endif
@@ -3282,43 +3539,43 @@ void RequestKalibrasiSolenoids()
       esp_camera_fb_return(fb);
     }
 
-    MqttPublishStatus("KALIBRASI SELENOID 6 ON");
+    // MqttPublishStatus("KALIBRASI SELENOID 6 ON");
 #ifdef USE_SOLENOID
     MechanicTyping(5);
 #endif
     delay(delaySolenoidCalib);
 
-    MqttPublishStatus("KALIBRASI SELENOID 7 ON");
+    // MqttPublishStatus("KALIBRASI SELENOID 7 ON");
 #ifdef USE_SOLENOID
     MechanicTyping(6);
 #endif
     delay(delaySolenoidCalib);
 
-    MqttPublishStatus("KALIBRASI SELENOID 8 ON");
+    // MqttPublishStatus("KALIBRASI SELENOID 8 ON");
 #ifdef USE_SOLENOID
     MechanicTyping(7);
 #endif
     delay(delaySolenoidCalib);
 
-    MqttPublishStatus("KALIBRASI SELENOID 9 ON");
+    // MqttPublishStatus("KALIBRASI SELENOID 9 ON");
 #ifdef USE_SOLENOID
     MechanicTyping(8);
 #endif
     delay(delaySolenoidCalib);
 
-    MqttPublishStatus("KALIBRASI SELENOID 0 ON");
+    // MqttPublishStatus("KALIBRASI SELENOID 0 ON");
 #ifdef USE_SOLENOID
     MechanicTyping(10);
 #endif
     delay(delaySolenoidCalib);
 
-    MqttPublishStatus("KALIBRASI SELENOID 0 ON");
+    // MqttPublishStatus("KALIBRASI SELENOID 0 ON");
 #ifdef USE_SOLENOID
     MechanicTyping(10);
 #endif
     delay(delaySolenoidCalib);
 
-    MqttPublishStatus("KALIBRASI SELENOID BACKSPACE ON");
+    // MqttPublishStatus("KALIBRASI SELENOID BACKSPACE ON");
 #ifdef USE_SOLENOID
     MechanicBackSpace();
 #endif
@@ -3347,7 +3604,7 @@ void RequestKalibrasiSolenoids()
       esp_camera_fb_return(fb1);
     }
 
-    MqttPublishStatus("KALIBRASI SELENOID ENTER ON");
+    // MqttPublishStatus("KALIBRASI SELENOID ENTER ON");
 #ifdef USE_SOLENOID
     MechanicEnter();
 #endif
@@ -3578,7 +3835,7 @@ void GetLogFile(/*char *token*/)
     logFile_i("Receive Log Now Command", "", __FUNCTION__, __LINE__);
 #endif
     char logNowDate[20];
-    MqttPublishStatus("UPLOAD LOG FILE NOW");
+    // MqttPublishStatus("UPLOAD LOG FILE NOW");
     struct tm *tm = pftime::localtime(nullptr);
     timeToCharFile(tm, logNowDate);
     LogUpload(logFileNowName, logNowDate);
@@ -3597,7 +3854,7 @@ void GetLogFile(/*char *token*/)
     logFile_i("Receive Log Daily Command", "", __FUNCTION__, __LINE__);
 #endif
     char logDailyDate[20];
-    MqttPublishStatus("UPLOAD LOG FILE HARIAN");
+    // MqttPublishStatus("UPLOAD LOG FILE HARIAN");
     struct tm *tm = pftime::localtime(nullptr);
     timeToCharFile(tm, logDailyDate);
     DuplicatingFile(logFileNowName, logFileDailyName);
@@ -3679,7 +3936,7 @@ void setup()
   }
   listDir(fileSys, "/", 3);
 
-  // KoneksiInit();
+  KoneksiInit();
   WifiInit();
   CameraInit();
   delay(1000);
@@ -3706,16 +3963,17 @@ void setup()
 
 void loop()
 {
-  // wifiReconRunner.execute();
-  // if (WiFi.status() == WL_CONNECTED /*and wifiReconRunner.execute()*/)
-  // {
-  if (!mqtt.connected() /*and status == Status::IDLE*/)
+  if (millis() > 300000)
+    btStop();
+
+  if (!mqtt.connected() and status == Status::IDLE)
   {
     MqttReconnect();
   }
   if (status == Status::IDLE)
   {
-    DetectionLowToken();
+    // DetectionLowToken();
+    DetectLowTokenV2();
     ReceiveAlarm();
     ReceiveFreq();
     ReceiveStatusSound();
@@ -3726,15 +3984,26 @@ void loop()
     GetKwhProcess();
     Alarm.delay(0);
   }
-  mqtt.loop();
+  signalFlag = mqtt.loop();
+  // TestSuara();
   TokenProcess();
   if (WiFi.status() == WL_CONNECTED)
   {
-    if (newToken)
+    if (newToken and mqtt.connected())
     {
+      btStop();
+      // UploadBuktiTokenProcessv2();
       newToken = !UploadBuktiTokenProcessv2();
+      // newToken = false;
+
+      // if (counterUpload > 3)
+      // {
+      //   counterUpload = 0;
+      //   UploadBuktiTokenProcessv2();
+
+      //   newToken = false;
+      //   //     //     // }
+      // }
     }
   }
-
-  // }
 }
