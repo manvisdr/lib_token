@@ -306,13 +306,10 @@ int valueInterval;
 
 unsigned int SoundPeak;
 // VARIABLE SOUND DETECTION
-
 bool prevAlarmStatus = false;
 bool AlarmStatus = false;
 bool timeAlarm = false;
-
 int counterAlarm;
-
 int cnt = 0;
 
 enum ENUM_KONEKSI
@@ -1661,7 +1658,7 @@ bool DetectionLowToken()
     counter++;
     Serial.printf("Frekuensi Detected. Counter %d\n", counter);
     // Serial.printf("COUNTER SHORT DETECT : %d\n", counter);
-    MqttCustomPublish(topicRSPSoundAlarmCnt, String(counter));
+    // MqttCustomPublish(topicRSPSoundAlarmCnt, String(counter));
   }
   else if (timer.time_over())
   {
@@ -1671,10 +1668,10 @@ bool DetectionLowToken()
     // timeAlarm = false;
   }
 
-  if (counter > 30)
+  if (counter > 50)
   {
     AlarmStatus = true;
-    MqttPublishResponse("Work: Low Saldo Detected");
+    // MqttPublishResponse("Work: Low Saldo Detected");
 
     // MqttCustomPublish(topicRSPSoundAlarm, String(counter));
     // counter = 0;
@@ -1702,7 +1699,7 @@ bool DetectionLowToken()
     // MqttCustomPublish(topicRSPSoundStatus, "SEND NOTIFICATION SOUND");
     // MqttCustomPublish(topicRSPStatus, "SEND NOTIFICATION SOUND");
     CaptureAndSendNotif();
-    MqttPublishResponse("Send: Upload Low Saldo");
+    // MqttPublishResponse("Send: Upload Low Saldo");
 #ifdef USE_LOG
     logFile_i("Notif Low Saldo", "", __FUNCTION__, __LINE__);
 #endif
@@ -1795,8 +1792,8 @@ int SoundDetectValidasi()
   SoundLooping();
   bool detectedGagal = detectFrequency(&soundValidasi, 2, SoundPeak, kwhfreqbuff, 196, true);
 
-  MqttCustomPublish(topicRSPSoundPeak, String(SoundPeak));
-  MqttCustomPublish(topicRSPSoundStatusVal, String(soundValidasiCnt));
+  // MqttCustomPublish(topicRSPSoundPeak, String(SoundPeak));
+  // MqttCustomPublish(topicRSPSoundStatusVal, String(soundValidasiCnt));
   if (detectedGagal /* and loudness > 40 */)
   {
     soundValidasiCnt++;
@@ -1827,6 +1824,10 @@ void SoundDetectValidasiV2()
   {
     beginCnt = counterValidasiSound;
   }
+  else if ((bolprevValidSound < bolnowValidSound) and (bolnowValidSound > bolnexValidSound))
+  {
+    counterBeep--;
+  }
 
   else if (bolnowValidSound > bolnexValidSound)
   {
@@ -1856,26 +1857,26 @@ String OutputSoundValidasi(int val)
     if (val != 0 && val < 25)
     {
       Serial.println("DETECK BENAR");
-      MqttCustomPublish(topicRSPSoundStatus, "VALIDASI SUARA BENAR");
+      // MqttCustomPublish(topicRSPSoundStatus, "VALIDASI SUARA BENAR");
       out = "success";
     }
     else if (val > 25)
     {
       Serial.println("DETECK GAGAL");
-      MqttCustomPublish(topicRSPSoundStatus, "VALIDASI SUARA GAGAL");
+      // MqttCustomPublish(topicRSPSoundStatus, "VALIDASI SUARA GAGAL");
       out = "failed";
     }
     else
     {
       Serial.println("DETECK INVALID");
-      MqttCustomPublish(topicRSPSoundStatus, "VALIDASI SUARA INVALID");
+      // MqttCustomPublish(topicRSPSoundStatus, "VALIDASI SUARA INVALID");
       out = "invalid";
     }
   }
   else
   {
     Serial.println("DETECK INVALID");
-    MqttCustomPublish(topicRSPSoundStatus, "VALIDASI SUARA INVALID");
+    // MqttCustomPublish(topicRSPSoundStatus, "VALIDASI SUARA INVALID");
     out = "invalid";
   }
   soundValidasiCnt = 0;
@@ -1888,13 +1889,13 @@ String OutputSoundValidasiV2()
   String out;
   if (kwhstatusbeepbuff == 1)
   {
-    if (valueInterval != 0 and valueInterval <= 14 and counterBeep <= 4)
+    if ((valueInterval != 0 and valueInterval <= 11 and counterBeep <= 2) or (valueInterval != 0 and valueInterval <= 11)) /* or valueInterval < 10 or counterBeep <= 2 */
     {
       Serial.println("DETECK BENAR");
       // MqttCustomPublish(topicRSPSoundStatus, "VALIDASI SUARA BENAR");
       out = "success";
     }
-    else if (valueInterval > 15 and counterBeep >= 2)
+    else if ((valueInterval >= 15 and counterBeep >= 2) or counterBeep >= 5)
     {
       Serial.println("DETECK GAGAL");
       // MqttCustomPublish(topicRSPSoundStatus, "VALIDASI SUARA GAGAL");
@@ -1908,9 +1909,13 @@ String OutputSoundValidasiV2()
     }
     else
     {
-      Serial.println("DETECK INVALID");
-      // MqttCustomPublish(topicRSPSoundStatus, "VALIDASI SUARA INVALID");
-      out = "invalid";
+      // Serial.println("DETECK INVALID");
+      // // MqttCustomPublish(topicRSPSoundStatus, "VALIDASI SUARA INVALID");
+      // out = "invalid";
+
+      Serial.println("DETECK BENAR");
+      // MqttCustomPublish(topicRSPSoundStatus, "VALIDASI SUARA BENAR");
+      out = "success";
     }
   }
   else
@@ -2496,7 +2501,7 @@ String sendImageStatusToken(char *filename, String status, char *token, char *sn
   String bodySatus = body_StatusToken();
   String bodyEnd = String("--") + BOUNDARY + String("--\r\n");
   size_t allLen = bodySatus.length() + filesize + bodyEnd.length();
-  String headerTxt = headerStatusToken(status, token, sn, allLen);
+  String headerTxt = headerStatusToken(status, sn, token, allLen);
   Serial.println("Upload Status...");
   postClient.setTimeout(30);
   if (postClient.connect(SERVER.c_str(), PORT))
@@ -2612,7 +2617,7 @@ void ReceiveAlarm(/*char *token*/)
       TimeKwhAlarm.time_over();
       TimeKwhAlarm.start(kwhalarmbuff);
     }
-    MqttCustomPublish(topicRSPAlarm, String(kwhalarmbuff));
+    MqttCustomPublish(topicRSPAlarm, String(received_payload));
     received_msg = false;
     status = Status::IDLE;
   }
@@ -2946,13 +2951,15 @@ void TokenProcess(/*char *token*/)
 #ifdef USE_SOLENOID
     MechanicEnter();
 #endif
-    delay(delaySolenoid);
+    // delay(delaySolenoid);
+    delay(100);
     // MqttPublishStatus("SELENOID ENTER ON");
+    Serial.println("");
     Serial.println("ENTER");
     // delay(delayStatus);
     // validasiStartTimer = millis();
 
-    afterSolenoid = millis();
+    afterSolenoid = millis() + 1000;
     Serial.printf("afterSolenoid =%d\n", afterSolenoid);
     received_msg = false;
     TokenStateStatus = true;
@@ -3972,8 +3979,8 @@ void loop()
   }
   if (status == Status::IDLE)
   {
-    // DetectionLowToken();
-    DetectLowTokenV2();
+    DetectionLowToken();
+    // DetectLowTokenV2();
     ReceiveAlarm();
     ReceiveFreq();
     ReceiveStatusSound();
