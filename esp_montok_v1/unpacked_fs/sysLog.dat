@@ -1,0 +1,21 @@
+0000000000|00000000;20;100; META DATA SPIFFS_SysLogger                                                        
+0000000040|[2023/02/19 16:45:31] INFO [ReceiveTopup:1544] Receive Token ^                                     
+0000000041|[2023/02/19 16:45:46] INFO [ReceiveTopup:1544] Receive Token ^                                     
+0000000042|[2023/02/19 16:46:13] INFO [ReceiveTopup:1544] Receive Token ^                                     
+0000000043|[2023/02/19 16:46:28] INFO [ReceiveTopup:1544] Receive Token ^                                     
+0000000044|[2023/02/19 16:46:47] INFO [ReceiveTopup:1544] Receive Token ^                                     
+0000000045|[2023/02/19 16:47:04] INFO [ReceiveTopup:1544] Receive Token ^                                     
+0000000046|[2023/02/19 16:50:11] INFO [ReceiveTopup:1544] Receive Token ^                                     
+0000000047|[2023/02/19 17:26:02] INFO [GetKwhProcess:1339] Retrieve Mqtt Command ^                            
+0000000048|[2023/02/19 17:41:01] INFO [GetKwhProcess:1339] Retrieve Mqtt Command ^                            
+0000000049|[2023/02/19 17:41:16] INFO [GetKwhProcess:1339] Retrieve Mqtt Command ^                            
+0000000050|[2023/02/19 17:42:11] INFO [ReceiveTopup:1872] Receive Token ^                                     
+0000000051|[2023/02/19 17:45:13] INFO [GetKwhProcess:1342] Retrieve Mqtt Command ^                            
+0000000052|[2023/02/19 20:58:01] INFO [GetKwhProcess:1363] Retrieve Mqtt Command ^                            
+0000000033|[2023/02/19 16:43:09] INFO [ReceiveTopup:1544] Receive Token ^                                     
+0000000034|[2023/02/19 16:43:37] INFO [ReceiveTopup:1544] Receive Token ^                                     
+0000000035|[2023/02/19 16:43:54] INFO [ReceiveTopup:1544] Receive Token ^                                     
+0000000036|[2023/02/19 16:44:10] INFO [ReceiveTopup:1544] Receive Token ^                                     
+0000000037|[2023/02/19 16:44:26] INFO [ReceiveTopup:1544] Receive Token ^                                     
+0000000038|[2023/02/19 16:44:43] INFO [ReceiveTopup:1544] Receive Token ^                                     
+0000000039|[2023/02/19 16:44:59] INFO [ReceiveTopup:1544] Receive Token ^                                     

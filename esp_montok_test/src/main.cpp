@@ -881,13 +881,6 @@ void WifiInit()
   wifi_connect_task.enableDelayed(5000);
   Serial.println("**WIFI INIT COMPLETE**");
 
-  // #ifdef USEOTA
-  //   OTASERVER.on("/", []()
-  //                { OTASERVER.send(200, "text/plain", "Hi! I am ESP8266."); });
-
-  //   ElegantOTA.begin(&OTASERVER); // Start ElegantOTA
-  //   OTASERVER.begin();
-  // #endif
 }
 
 void MqttCustomPublish(char *path, String msg);
@@ -902,7 +895,7 @@ String sendPhotoViewKWH(char *sn)
   esp_camera_fb_return(fb); // dispose the buffered image
   fb = NULL;                // reset to capture errors
   fb = esp_camera_fb_get(); // get fresh image
-  // camera_fb_t *fb = esp_camera_fb_get();
+ 
   if (!fb)
   {
     Serial.println("Camera capture failed");
@@ -3992,9 +3985,8 @@ void dumpSysLog()
   int seekVal = 0, len = 0;
   char cIn;
 
-  File sl = fileSys.open("/logNow.txt", "r");
-  Serial.println("\r\n===charDump=============================");
-  Serial.printf("%4d [", 0);
+  File sl = fileSys.open("/sysLog.dat", "r");
+
   while (sl.available())
   {
     cIn = (char)sl.read();
@@ -4004,7 +3996,6 @@ void dumpSysLog()
     Serial.print(cIn);
   }
   sl.close();
-  Serial.println("\r\n========================================\r\n");
 
 } //  dumpSysLog()
 
