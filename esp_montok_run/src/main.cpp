@@ -48,13 +48,14 @@
 // Callback methods prototypes
 void wifi_connect_cb();
 void wifi_watchdog_cb();
-void timeToCharLog(struct tm *tm, suseconds_t usec, char *dest);
+void timeToCharLog(struct tm *tm, char *dest);
 void timeToCharFile(struct tm *tm, char *dest);
 
 void logFile_i(char *msg1, char *msg2, const char *filename, int line /* , char *dest */);
 void logFile_e(char *msg1, char *msg2 /* , char *dest */);
 void logFile_w(char *msg1, char *msg2 /* , char *dest */);
 void RespondParameter();
+char *urlencode(char *originalText);
 
 // Tasks
 Task wifi_connect_task(WIFI_CONNECT_INTERVAL, TASK_FOREVER, &wifi_connect_cb);
@@ -365,6 +366,8 @@ int timeEnableAlarm = 60;
 void MqttCustomPublish(char *path, String msg);
 void MqttPublishStatus(String msg);
 void WifiInit();
+String LogUploadTest(String message);
+void LogUploadFormat(const char *function, char *msg, char *msg2);
 
 char *my_itoa(char *dest, int i)
 {
@@ -1486,11 +1489,13 @@ bool MqttConnect()
 
 void MqttCustomPublish(char *path, String msg)
 {
+
   mqtt.publish(path, msg.c_str());
 }
 
 void MqttPublishStatus(String msg)
 {
+
   MqttCustomPublish(topicRSPStatus, msg);
 }
 
@@ -1668,7 +1673,7 @@ bool DetectionLowToken()
     // timeAlarm = false;
   }
 
-  if (counter > 50)
+  if (counter > 20)
   {
     AlarmStatus = true;
     // MqttPublishResponse("Work: Low Saldo Detected");
@@ -1689,7 +1694,7 @@ bool DetectionLowToken()
     }
     else if (counter > 12)
     {
-      Serial.println("COUNTDOWN TIME OVER, TIME ALARM TRUE");
+      // Serial.println("COUNTDOWN TIME OVER, TIME ALARM TRUE");
       timeAlarm = true;
     }
   }
@@ -1698,18 +1703,22 @@ bool DetectionLowToken()
   {
     // MqttCustomPublish(topicRSPSoundStatus, "SEND NOTIFICATION SOUND");
     // MqttCustomPublish(topicRSPStatus, "SEND NOTIFICATION SOUND");
-    CaptureAndSendNotif();
+
     // MqttPublishResponse("Send: Upload Low Saldo");
 #ifdef USE_LOG
     logFile_i("Notif Low Saldo", "", __FUNCTION__, __LINE__);
 #endif
     Serial.println("SEND NOTIFICATION");
-
-    counter = 0;
-    AlarmStatus = false;
-    prevAlarmStatus = false;
-    timeAlarm = false;
-    TimeKwhAlarm.start(kwhalarmbuff);
+    if (mqtt.connected())
+    {
+      if (WiFi.status() == WL_CONNECTED)
+        CaptureAndSendNotif();
+      counter = 0;
+      AlarmStatus = false;
+      prevAlarmStatus = false;
+      timeAlarm = false;
+      TimeKwhAlarm.start(kwhalarmbuff);
+    }
   }
 
   return false;
@@ -1768,19 +1777,23 @@ int DetectLowTokenV2()
 
   if (AlarmStatus and timeAlarm)
   {
-    CaptureAndSendNotif();
+
+    // CaptureAndSendNotif();
 #ifdef USE_LOG
     logFile_i("Notif Low Saldo", "", __FUNCTION__, __LINE__);
     logNew("Send Notif Low Saldo", __FUNCTION__, __LINE__, "", "");
 #endif
     //
     Serial.println("SEND NOTIFICATION");
-
-    counterAlarm = 0;
-    AlarmStatus = false;
-    prevAlarmStatus = false;
-    timeAlarm = false;
-    TimeKwhAlarm.start(kwhalarmbuff);
+    if (mqtt.connected())
+    {
+      CaptureAndSendNotif();
+      counterAlarm = 0;
+      AlarmStatus = false;
+      prevAlarmStatus = false;
+      timeAlarm = false;
+      TimeKwhAlarm.start(kwhalarmbuff);
+    }
   }
 
   return false;
@@ -1815,20 +1828,22 @@ int SoundDetectValidasi()
 void SoundDetectValidasiV2()
 {
   SoundLooping();
-
+  int melcoinda = 111;
+  // MELCOINDA = 111
   bolprevValidSound = bolnowValidSound;
   bolnowValidSound = bolnexValidSound;
-  bolnexValidSound = SoundPeak == kwhfreqbuff || (SoundPeak == kwhfreqbuff + 1 || SoundPeak == kwhfreqbuff - 1);
+  bolnexValidSound = SoundPeak == melcoinda || (SoundPeak == melcoinda + 1 || SoundPeak == melcoinda - 1);
 
   if ((bolprevValidSound < bolnowValidSound))
   {
     beginCnt = counterValidasiSound;
   }
-  else if ((bolprevValidSound < bolnowValidSound) and (bolnowValidSound > bolnexValidSound))
-  {
-    counterBeep--;
-  }
-
+  // ITRON
+  // else if ((bolprevValidSound < bolnowValidSound) and (bolnowValidSound > bolnexValidSound))
+  // {
+  //   counterBeep--;
+  // }
+  // ITRON
   else if (bolnowValidSound > bolnexValidSound)
   {
     lastCnt = counterValidasiSound;
@@ -1889,18 +1904,30 @@ String OutputSoundValidasiV2()
   String out;
   if (kwhstatusbeepbuff == 1)
   {
-    if ((valueInterval != 0 and valueInterval <= 11 and counterBeep <= 2) or (valueInterval != 0 and valueInterval <= 11)) /* or valueInterval < 10 or counterBeep <= 2 */
-    {
-      Serial.println("DETECK BENAR");
-      // MqttCustomPublish(topicRSPSoundStatus, "VALIDASI SUARA BENAR");
-      out = "success";
-    }
-    else if ((valueInterval >= 15 and counterBeep >= 2) or counterBeep >= 5)
+    // ITRON
+    //  MqttPublishStatus("Deteksi Sound -> Value Interval: " + String(valueInterval) + "Beep Pattern:" + String(counterBeep));
+    //  if ((valueInterval != 0 and valueInterval <= 11 and counterBeep <= 2) or (valueInterval != 0 and valueInterval <= 11)) /* or valueInterval < 10 or counterBeep <= 2 */
+    //  {
+    //    Serial.println("DETECK BENAR");
+    //    // MqttCustomPublish(topicRSPSoundStatus, "VALIDASI SUARA BENAR");
+    //    out = "success";
+    //  }
+    //  else if ((valueInterval >= 15 and counterBeep >= 2) or counterBeep >= 5)
+    //  {
+    //    Serial.println("DETECK GAGAL");
+    //    // MqttCustomPublish(topicRSPSoundStatus, "VALIDASI SUARA GAGAL");
+    //    out = "failed";
+    //  }
+    //  ITRON
+
+    // MELCOINDA
+    if ((valueInterval >= 4 and counterBeep >= 2) or counterBeep >= 5)
     {
       Serial.println("DETECK GAGAL");
       // MqttCustomPublish(topicRSPSoundStatus, "VALIDASI SUARA GAGAL");
       out = "failed";
     }
+
     else if (valueInterval == 0 and counterBeep == 0)
     {
       Serial.println("DETECK INVALID");
@@ -1942,6 +1969,8 @@ void GetKwhProcess()
 #ifdef USE_LOG
     logFile_i("Retrieve Mqtt Command", "", __FUNCTION__, __LINE__);
 #endif
+    // LogUploadFormat(__FUNCTION__, "Send Image View KWH", "");
+    //  LogUploadTest(urlencode("Send Image View KWH"));
     MqttPublishResponse("view");
     // MqttPublishStatus("REQUESTING BALANCE");
     Serial.println("GET_KWH");
@@ -1951,7 +1980,8 @@ void GetKwhProcess()
 #ifdef USE_LOG
     logFile_i("Capture and Upload Photo", "", __FUNCTION__, __LINE__);
 #endif
-    Serial.println(sendPhotoViewKWH(idDevice));
+    if (WiFi.status() == WL_CONNECTED and WiFi.status ==)
+      Serial.println(sendPhotoViewKWH(idDevice));
     received_msg = false;
     status = Status::IDLE;
   }
@@ -2862,9 +2892,11 @@ void TokenProcess(/*char *token*/)
   {
     status = Status::PROCCESS_TOKEN;
     MqttPublishResponse("topup");
+    MqttPublishStatus("Token Process: " + String(received_payload));
 #ifdef USE_LOG
     logFile_i("Retrieve Topup Command", "", __FUNCTION__, __LINE__);
 #endif
+    LogUploadFormat(__FUNCTION__, "Process Token :", received_payload);
     for (int i = 0; i < received_length; i++)
     {
       char chars = received_payload[i];
@@ -2961,6 +2993,7 @@ void TokenProcess(/*char *token*/)
 
     afterSolenoid = millis() + 1000;
     Serial.printf("afterSolenoid =%d\n", afterSolenoid);
+    // MqttPublishStatus("Token Process: Record Sound");
     received_msg = false;
     TokenStateStatus = true;
     sendSoundState = true;
@@ -3023,11 +3056,8 @@ void TokenProcess(/*char *token*/)
       {
         // res = sendImageStatusToken(StrSoundValidasi, idDevice, received_payload, fbs->buf, fbs->len);
         CaptureStatus = CaptureToSpiffs(statusFileSpiffs, fbs->buf, fbs->len);
-#ifdef USE_LOG
-        logFile_i("Upload Image Status", "", __FUNCTION__, __LINE__);
-#endif
-        // digitalWrite(4, LOW);
-        // Serial.println(res);
+        // MqttPublishStatus("Token Process: Capture Status");
+        // LogUploadFormat(__FUNCTION__, "Capture Image Status Success");
         esp_camera_fb_return(fbs);
       }
 
@@ -3128,10 +3158,9 @@ void TokenProcess(/*char *token*/)
       else
       {
         CaptureNominal = CaptureToSpiffs(nominalFileSpiffs, fb->buf, fb->len);
+
+        // LogUploadFormat(__FUNCTION__, "Capture Image Nominal Success");
         // res = sendImageNominal(received_payload, fb->buf, fb->len);
-#ifdef USE_LOG
-        logFile_i("Upload Image Nominal", "", __FUNCTION__, __LINE__);
-#endif
         // Serial.println(res);
         esp_camera_fb_return(fb);
       }
@@ -3154,9 +3183,6 @@ void TokenProcess(/*char *token*/)
       esp_camera_fb_return(fb); // dispose the buffered image
       fb = NULL;                // reset to capture errors
       fb = esp_camera_fb_get(); // get fresh image
-#ifdef USE_LOG
-      logFile_i("Capture Image Nominal", "", __FUNCTION__, __LINE__);
-#endif
       if (!fb)
       {
         Serial.println("Camera capture failed");
@@ -3166,11 +3192,8 @@ void TokenProcess(/*char *token*/)
       else
       {
         CaptureNominal = CaptureToSpiffs(nominalFileSpiffs, fb->buf, fb->len);
+        // LogUploadFormat(__FUNCTION__, "Capture Image Nominal Success");
         // res = sendImageNominal(received_payload, fb->buf, fb->len);
-#ifdef USE_LOG
-        logFile_i("Upload Image Nominal", "", __FUNCTION__, __LINE__);
-#endif
-        // Serial.println(res);
         esp_camera_fb_return(fb);
       }
       TokenStateNominal = false;
@@ -3208,6 +3231,7 @@ void TokenProcess(/*char *token*/)
       else
       {
         CaptureSaldo = CaptureToSpiffs(saldoFileSpiffs, fb->buf, fb->len);
+        // LogUploadFormat(__FUNCTION__, "Capture Image Saldo Success");
         // res = sendImageSaldo(received_payload, fb->buf, fb->len);
 #ifdef USE_LOG
         logFile_i("Upload Image Saldo Token: ", received_payload, __FUNCTION__, __LINE__);
@@ -3223,8 +3247,14 @@ void TokenProcess(/*char *token*/)
     TokenStateSaldo = false;
     received_msg = false;
     newToken = true;
+    MqttPublishStatus("Token Process: Sound Interval: " + String(valueInterval) + " Pattern:" + String(counterBeep));
+    String soundintervaLog = "Deteksi Sound: Interval: " + String(valueInterval);
+    String soundpatternLog = " Pattern:" + String(counterBeep);
+    LogUploadFormat(__FUNCTION__, (char *)soundintervaLog.c_str(), (char *)soundpatternLog.c_str());
     StrSoundValidasi = OutputSoundValidasiV2();
     Serial.println(StrSoundValidasi);
+    MqttPublishStatus("Token Process: Sound: " + StrSoundValidasi);
+    LogUploadFormat(__FUNCTION__, "Status Sound: ", (char *)StrSoundValidasi.c_str());
     status = Status::IDLE;
   }
 
@@ -3488,6 +3518,7 @@ void RequestKalibrasiSolenoids()
   {
     status = Status::WORKING;
     MqttPublishResponse("calibrate");
+    MqttPublishStatus("Kalibrasi Process");
 #ifdef USE_LOG
     logFile_i("Receive Kalibrasi Command", "", __FUNCTION__, __LINE__);
 #endif
@@ -3538,7 +3569,8 @@ void RequestKalibrasiSolenoids()
     }
     else
     {
-      res = sendImageKalibrasi("1", fb->buf, fb->len);
+      if (WiFi.status() == WL_CONNECTED)
+        res = sendImageKalibrasi("1", fb->buf, fb->len);
 #ifdef USE_LOG
       logFile_i("Upload Kalibrasi 1", "", __FUNCTION__, __LINE__);
 #endif
@@ -3586,7 +3618,7 @@ void RequestKalibrasiSolenoids()
 #ifdef USE_SOLENOID
     MechanicBackSpace();
 #endif
-
+    delay(500);
     camera_fb_t *fb1 = NULL;
     fb1 = esp_camera_fb_get();
     esp_camera_fb_return(fb1); // dispose the buffered image
@@ -3603,7 +3635,8 @@ void RequestKalibrasiSolenoids()
     }
     else
     {
-      res = sendImageKalibrasi("2", fb1->buf, fb1->len);
+      if (WiFi.status() == WL_CONNECTED)
+        res = sendImageKalibrasi("2", fb1->buf, fb1->len);
 #ifdef USE_LOG
       logFile_i("Upload Kalibrasi 2", "", __FUNCTION__, __LINE__);
 #endif
@@ -3615,6 +3648,7 @@ void RequestKalibrasiSolenoids()
 #ifdef USE_SOLENOID
     MechanicEnter();
 #endif
+    MqttPublishStatus("Kalibrasi Process End");
     received_msg = false;
     status = Status::IDLE;
   }
@@ -3689,16 +3723,15 @@ bool CreatingFile(char *filename)
 }
 
 // timetocharLog -> [YYYY/MM/DD HH:MM:SS.MSMSMS]
-void timeToCharLog(struct tm *tm, suseconds_t usec, char *dest)
+void timeToCharLog(struct tm *tm, char *dest)
 {
-  sprintf(dest, "[%04d/%02d/%02d %02d:%02d:%02d.%06ld]",
+  sprintf(dest, "[%04d/%02d/%02d %02d:%02d:%02d]",
           tm->tm_year + 1900,
           tm->tm_mon + 1,
           tm->tm_mday,
           tm->tm_hour,
           tm->tm_min,
-          tm->tm_sec,
-          usec);
+          tm->tm_sec);
 }
 
 // timetocharFile -> YYYY/MM/DD
@@ -3715,10 +3748,13 @@ void logFile_i(char *msg1, char *msg2, const char *function, int line /* , char 
   // filePrint.open();
   char charTime[30];
   struct tm *tm = pftime::localtime(nullptr);
-  suseconds_t usec;
-  timeToCharLog(tm, usec, charTime);
+  timeToCharLog(tm, charTime);
   Serial.println(charTime);
-  // filePrint.printf("%s %-5s[%-5s:%d] %s %s\n", charTime, "INFO", function, line, msg1, msg2);
+
+  // int strtId = sysLog.getLastLineID();
+  // sysLog.writef("%s %-5s[%-5s:%d] : %s %s", charTime, "INFO", function, line, msg1, msg2);
+  // // sysLog.writef("zzzzzzzzzz\n");
+
   // filePrint.close();
 }
 
@@ -3727,8 +3763,7 @@ void logFile_w(char *msg1, char *msg2 /* , char *dest */)
   // filePrint.open();
   char charTime[30];
   struct tm *tm = pftime::localtime(nullptr);
-  suseconds_t usec;
-  timeToCharLog(tm, usec, charTime);
+  timeToCharLog(tm, charTime);
   // int strtId = syslogFIle.getLastLineID();
   // syslogFIle.writef("%s %-5s[%-5s:%d] %s %s", charTime, "WARNING", __FUNCTION__, __LINE__, msg1, msg2);
   // filePrint.printf("%s %-5s[%-5s:%d] %s %s", charTime, "WARNING", __FUNCTION__, __LINE__, msg1, msg2);
@@ -3740,8 +3775,7 @@ void logFile_e(char *msg1, char *msg2 /* , char *dest */)
   // filePrint.open();
   char charTime[30];
   struct tm *tm = pftime::localtime(nullptr);
-  suseconds_t usec;
-  timeToCharLog(tm, usec, charTime);
+  timeToCharLog(tm, charTime);
   // int strtId = syslogFIle.getLastLineID();
   // syslogFIle.writef("%s %-5s[%-5s:%d] %s %s", charTime, "ERROR", __FUNCTION__, __LINE__, msg1, msg2);
   // filePrint.printf("%s %-5s[%-5s:%d] %s %s", charTime, "ERROR", __FUNCTION__, __LINE__, msg1, msg2);
@@ -3816,21 +3850,132 @@ String LogUpload(char *filename, char *tgl)
   return ("UPLOADED");
 }
 
-#ifdef USE_LOG
-void LogInit()
+String headerLogFile(String message, size_t length)
 {
-  logFileSPIFFS.begin(true);
-
-  if (!syslogFIle.begin(250, 100))
-  {
-    Serial.println("Error opening sysLog!\r\nCreated sysLog!");
-    delay(5000);
-  }
-  syslogFIle.setOutput(&Serial, 115200);
-  // syslogFIle.setDebugLvl(0);
-  syslogFIle.status();
+  String data;
+  // /logdevice/upload/?sn=007&tgl=22%2F04%2F07'
+  data = "POST /logdevice/upload/?sn=" + String(idDevice) + "&tgl=" + String(message) + " HTTP/1.1\r\n";
+  data += "cache-control: no-cache\r\n";
+  data += "Content-Type: multipart/form-data; boundary=";
+  data += BOUNDARY;
+  data += "\r\n";
+  data += "User-Agent: PostmanRuntime/6.4.1\r\n";
+  data += "Accept: */*\r\n";
+  data += "Host: ";
+  data += SERVER;
+  data += "\r\n";
+  data += "accept-encoding: gzip, deflate\r\n";
+  data += "Connection: keep-alive\r\n";
+  data += "content-length: ";
+  data += String(length);
+  data += "\r\n";
+  data += "\r\n";
+  return (data);
 }
-#endif
+
+String headerLogTest(char *sn, String message)
+{
+  // /logdevice/write/?sn=999&message=test%5Cntest%5Cntest%5Cn'
+  String serialnum = String(sn);
+  String data;
+  data = "POST /logdevice/write/?sn=" + serialnum + "&message=" + message + " HTTP/1.1\r\n";
+  data += "Accept: */*\r\n";
+  data += "User-Agent: PostmanRuntime/6.4.1\r\n";
+  data += "Content-Type: multipart/form-data; boundary=---011000010111000001101001";
+  data += "\r\n";
+  data += "Host: ";
+  data += SERVER + ":" + String(PORT);
+  data += "\r\n";
+  data += "\r\n";
+  data += "\r\n";
+  return (data);
+}
+
+char *urlencode(char *originalText)
+{
+  // allocate memory for the worst possible case (all characters need to be encoded)
+  char *encodedText = (char *)malloc(sizeof(char) * strlen(originalText) * 3 + 1);
+
+  const char *hex = "0123456789abcdef";
+
+  int pos = 0;
+  for (int i = 0; i < strlen(originalText); i++)
+  {
+    if (('a' <= originalText[i] && originalText[i] <= 'z') || ('A' <= originalText[i] && originalText[i] <= 'Z') || ('0' <= originalText[i] && originalText[i] <= '9'))
+    {
+      encodedText[pos++] = originalText[i];
+    }
+    else
+    {
+      encodedText[pos++] = '%';
+      encodedText[pos++] = hex[originalText[i] >> 4];
+      encodedText[pos++] = hex[originalText[i] & 15];
+    }
+  }
+  encodedText[pos] = '\0';
+  return encodedText;
+}
+
+String urlEncode(const char *msg)
+{
+  const char *hex = "0123456789ABCDEF";
+  String encodedMsg = "";
+
+  while (*msg != '\0')
+  {
+    if (
+        ('a' <= *msg && *msg <= 'z') || ('A' <= *msg && *msg <= 'Z') || ('0' <= *msg && *msg <= '9') || *msg == '-' || *msg == '_' || *msg == '.' || *msg == '~')
+    {
+      encodedMsg += *msg;
+    }
+    else
+    {
+      encodedMsg += '%';
+      encodedMsg += hex[(unsigned char)*msg >> 4];
+      encodedMsg += hex[*msg & 0xf];
+    }
+    msg++;
+  }
+  return encodedMsg;
+}
+
+String urlEncode(String msg)
+{
+  return urlEncode(msg.c_str());
+}
+
+String LogUploadTest(String message)
+{
+  String serverRes;
+  String getBody;
+  WiFiClient postClient;
+
+  String headerTxt = headerLogTest(idDevice, message);
+
+  if (!postClient.connect(SERVER.c_str(), PORT))
+  {
+    return ("LogUploadTest Failed to Send\n");
+  }
+
+  postClient.print(headerTxt);
+  // Serial.print(headerTxt);
+
+  return ("LogUploadTest Sent\n");
+}
+
+void LogUploadFormat(const char *function, char *msg, char *msg2)
+{
+  char logNowDate[30];
+  char logBuffer[300];
+  struct tm *tm = pftime::localtime(nullptr);
+  timeToCharLog(tm, logNowDate);
+  sprintf(logBuffer, "%s [%s]: %s %s\n", logNowDate, function, msg, msg2);
+  Serial.println(logBuffer);
+  if (WiFi.status() == WL_CONNECTED)
+    LogUploadTest(urlencode(logBuffer));
+  memset(logBuffer, '\0', 300);
+  memset(logNowDate, '\0', 100);
+}
 
 void GetLogFile(/*char *token*/)
 {
@@ -3838,17 +3983,12 @@ void GetLogFile(/*char *token*/)
   {
     status = Status::WORKING;
     MqttPublishResponse("log");
-#ifdef USE_LOG
-    logFile_i("Receive Log Now Command", "", __FUNCTION__, __LINE__);
-#endif
-    char logNowDate[20];
-    // MqttPublishStatus("UPLOAD LOG FILE NOW");
+    char logNowDate[30];
     struct tm *tm = pftime::localtime(nullptr);
-    timeToCharFile(tm, logNowDate);
-    LogUpload(logFileNowName, logNowDate);
-#ifdef USE_LOG
-    logFile_i("Upload Log Now", "", __FUNCTION__, __LINE__);
-#endif
+    suseconds_t usec;
+    timeToCharLog(tm, logNowDate);
+    // LogUploadFormat(__FUNCTION__, "Get Log File", "");
+    //  LogUpload(logFileNowName, logNowDate);
     received_msg = false;
     status = Status::IDLE;
   }
@@ -3857,19 +3997,16 @@ void GetLogFile(/*char *token*/)
   {
     status = Status::WORKING;
     MqttPublishResponse("log");
-#ifdef USE_LOG
-    logFile_i("Receive Log Daily Command", "", __FUNCTION__, __LINE__);
-#endif
+
     char logDailyDate[20];
     // MqttPublishStatus("UPLOAD LOG FILE HARIAN");
     struct tm *tm = pftime::localtime(nullptr);
     timeToCharFile(tm, logDailyDate);
-    DuplicatingFile(logFileNowName, logFileDailyName);
-    LogUpload(logFileDailyName, logDailyDate);
-#ifdef USE_LOG
-    logFile_i("Upload Log Daily", "", __FUNCTION__, __LINE__);
-#endif
-    RemovingFile(logFileDailyName);
+    LogUploadTest(String(logDailyDate) + "VVVVVVVVV");
+    // DuplicatingFile(logFileNowName, logFileDailyName);
+    // LogUpload(logFileDailyName, logDailyDate);
+
+    // RemovingFile(logFileDailyName);
     received_msg = false;
     status = Status::IDLE;
   }
@@ -3945,6 +4082,13 @@ void setup()
 
   KoneksiInit();
   WifiInit();
+  Serial.println(WiFi.localIP());
+  Serial.println(WiFi.RSSI());
+  // while (WiFi.status() != WL_CONNECTED)
+  // {
+  //   Serial.print(".");
+  //   delay(100);
+  // }
   CameraInit();
   delay(1000);
   SoundInit();
@@ -3956,7 +4100,7 @@ void setup()
   mqtt.setCallback(callback);
   MqttTopicInit();
   pftime::configTzTime(PSTR("WIB-7"), ntpServer);
-
+  delay(1000);
   // Alarm.timerOnce(10, dummySignalSend);
   // Alarm.timerRepeat(25, CheckPingGateway);
   pingTimeSend = Alarm.timerRepeat(10, dummySignalSend /* CheckPingSend */);
@@ -3965,7 +4109,7 @@ void setup()
   digitalWrite(33, LOW);
   status = Status::IDLE;
 
-  fileSys.end();
+  // fileSys.end();
 }
 
 void loop()
@@ -3987,7 +4131,7 @@ void loop()
     ReceiveTimeNominal();
     ReceiveTimeStatus();
     RequestKalibrasiSolenoids();
-    GetLogFile();
+    // GetLogFile();
     GetKwhProcess();
     Alarm.delay(0);
   }
@@ -4001,6 +4145,7 @@ void loop()
       btStop();
       // UploadBuktiTokenProcessv2();
       newToken = !UploadBuktiTokenProcessv2();
+
       // newToken = false;
 
       // if (counterUpload > 3)
