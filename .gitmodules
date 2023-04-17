@@ -32,3 +32,6 @@
 [submodule "logging"]
 	path = logging
 	url = https://github.com/esp32m/logging
+[submodule "ESP32Ping"]
+	path = ESP32Ping
+	url = https://github.com/marian-craciunescu/ESP32Ping
