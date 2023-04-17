@@ -32,6 +32,3 @@
 [submodule "logging"]
 	path = logging
 	url = https://github.com/esp32m/logging
-[submodule "TaskScheduler"]
-	path = TaskScheduler
-	url = https://github.com/arkhipenko/TaskScheduler
