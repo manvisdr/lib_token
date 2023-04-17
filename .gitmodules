@@ -32,6 +32,3 @@
 [submodule "logging"]
 	path = logging
 	url = https://github.com/esp32m/logging
-[submodule "Adafruit-MCP23017-Arduino-Library"]
-	path = Adafruit-MCP23017-Arduino-Library
-	url = https://github.com/adafruit/Adafruit-MCP23017-Arduino-Library
