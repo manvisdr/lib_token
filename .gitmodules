@@ -1,0 +1,34 @@
+[submodule "SketchLogger"]
+	path = SketchLogger
+	url = https://github.com/SergiuToporjinschi/SketchLogger
+[submodule "ESP32-OV5640-AF"]
+	path = ESP32-OV5640-AF
+	url = https://github.com/0015/ESP32-OV5640-AF
+[submodule "Time"]
+	path = Time
+	url = https://github.com/PaulStoffregen/Time
+[submodule "TimeAlarms"]
+	path = TimeAlarms
+	url = https://github.com/PaulStoffregen/TimeAlarms
+[submodule "Arduino-Timeout"]
+	path = Arduino-Timeout
+	url = https://github.com/tfeldmann/Arduino-Timeout
+[submodule "SPIFFS_FilePrint"]
+	path = SPIFFS_FilePrint
+	url = https://github.com/PRosenb/SPIFFS_FilePrint
+[submodule "ESP.multiLogger"]
+	path = ESP.multiLogger
+	url = https://github.com/voelkerb/ESP.multiLogger
+[submodule "ESPPerfectTime"]
+	path = ESPPerfectTime
+	url = https://github.com/hunamizawa/ESPPerfectTime
+[submodule "pubsubclient"]
+	path = pubsubclient
+	url = https://github.com/knolleary/pubsubclient
+[submodule "ArduinoJson"]
+	path = ArduinoJson
+	url = https://github.com/bblanchon/ArduinoJson
+	branch = 6.x
+[submodule "logging"]
+	path = logging
+	url = https://github.com/esp32m/logging
